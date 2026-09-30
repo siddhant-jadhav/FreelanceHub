@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "532799226637",
+    "firebase_url": "https://freelancehub-67192-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "freelancehub-67192",
+    "storage_bucket": "freelancehub-67192.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:532799226637:android:507611c059e04882a22644",
+        "android_client_info": {
+          "package_name": "com.example.freelancehub"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXLFFV1D3nFKvOgtxKgOHLrCz-mxTmBHI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
