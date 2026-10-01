@@ -297,9 +297,21 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
                           ),
                         ],
                       ),
-                      IconButton(
-                        icon: const Icon(LucideIcons.x, size: 20),
-                        onPressed: () => Navigator.pop(ctx),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(LucideIcons.maximize2, size: 18, color: AppColors.textSecondary),
+                            tooltip: 'Open Full Offer Builder',
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              Navigator.pushNamed(context, '/send-offer', arguments: request);
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(LucideIcons.x, size: 20),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -337,6 +349,42 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
                           ),
                         ),
                       ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Shortcut to Full Screen Offer Studio
+                  InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      Navigator.pushNamed(context, '/send-offer', arguments: request);
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(LucideIcons.sparkles, size: 14, color: AppColors.primaryDark),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Need Milestones & AI Assistant? Open Full Studio',
+                              style: GoogleFonts.inter(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primaryDark,
+                              ),
+                            ),
+                          ),
+                          const Icon(LucideIcons.arrowRight, size: 13, color: AppColors.primaryDark),
+                        ],
+                      ),
                     ),
                   ),
 
@@ -763,15 +811,13 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
         onTap: (index) {
           if (index == 0) {
             Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
+          } else if (index == 2) {
+            Navigator.of(context).pushNamed('/orders');
           } else if (index != 1) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  index == 2
-                      ? 'Opening Orders...'
-                      : index == 3
-                          ? 'Opening Inbox...'
-                          : 'Opening Earnings...',
+                  index == 3 ? 'Opening Inbox...' : 'Opening Earnings...',
                 ),
                 duration: const Duration(seconds: 1),
               ),

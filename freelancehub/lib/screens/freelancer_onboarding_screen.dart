@@ -117,15 +117,32 @@ class _FreelancerOnboardingScreenState
     try {
       final user = FirebaseService.instance.currentUser;
       if (user != null) {
-        await FirebaseService.instance.database
-            .ref('users/${user.uid}/profile')
-            .update({
-          'title': _titleController.text.trim(),
-          'bio': _bioController.text.trim(),
-          'experienceLevel': _selectedExperience,
-          'languages': _selectedLanguages.toList(),
-          'onboardingStep': 1,
-        });
+        // 1. Update Cloud Firestore
+        try {
+          await FirebaseService.instance.userRepository.updateOnboardingProgress(
+            user.uid,
+            step: 1,
+            completed: false,
+          );
+          await FirebaseService.instance.freelancerRepository.updateProfile(
+            user.uid,
+            title: _titleController.text.trim(),
+            bio: _bioController.text.trim(),
+          );
+        } catch (_) {}
+
+        // 2. Mirror to Realtime Database
+        try {
+          await FirebaseService.instance.database
+              .ref('users/${user.uid}/profile')
+              .update({
+            'title': _titleController.text.trim(),
+            'bio': _bioController.text.trim(),
+            'experienceLevel': _selectedExperience,
+            'languages': _selectedLanguages.toList(),
+            'onboardingStep': 1,
+          });
+        } catch (_) {}
       }
 
       await Future.delayed(const Duration(milliseconds: 300));

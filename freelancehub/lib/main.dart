@@ -1,16 +1,18 @@
-import 'package:firebase_core/firebase_core.dart' hide FirebaseService;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'core/firebase/firebase_config.dart';
 import 'core/services/firebase_service.dart';
 import 'core/theme/app_colors.dart';
-import 'firebase_options.dart';
 import 'screens/buyer_requests_screen.dart';
 import 'screens/client_home_screen.dart';
 import 'screens/freelancer_dashboard_screen.dart';
 import 'screens/freelancer_onboarding_screen.dart';
 import 'screens/freelancer_onboarding_step2_screen.dart';
+import 'screens/freelancer_orders_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/order_delivery_screen.dart';
+import 'screens/send_offer_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/splash_screen.dart';
 
@@ -18,9 +20,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+    await FirebaseConfig.instance.initialize();
   } catch (e) {
     debugPrint('Firebase initialization warning: $e');
   }
@@ -72,7 +72,10 @@ class FreelanceHubApp extends StatelessWidget {
             (settings.name == '/freelancer-onboarding' ||
                 settings.name == '/freelancer-onboarding-step2' ||
                 settings.name == '/freelancer-dashboard' ||
-                settings.name == '/buyer-requests')) {
+                settings.name == '/buyer-requests' ||
+                settings.name == '/send-offer' ||
+                settings.name == '/orders' ||
+                settings.name == '/order-delivery')) {
           return MaterialPageRoute(
             builder: (context) => const ClientHomeScreen(),
             settings: settings,
@@ -91,6 +94,9 @@ class FreelanceHubApp extends StatelessWidget {
         '/freelancer-dashboard': (context) =>
             const FreelancerDashboardScreen(),
         '/buyer-requests': (context) => const BuyerRequestsScreen(),
+        '/send-offer': (context) => const SendOfferScreen(),
+        '/orders': (context) => const FreelancerOrdersScreen(),
+        '/order-delivery': (context) => const OrderDeliveryScreen(),
         '/client-home': (context) => const ClientHomeScreen(),
       },
     );

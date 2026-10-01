@@ -197,16 +197,37 @@ class _FreelancerOnboardingStep2ScreenState
     try {
       final user = FirebaseService.instance.currentUser;
       if (user != null) {
-        await FirebaseService.instance.database
-            .ref('users/${user.uid}/profile')
-            .update({
-          'skills': _selectedSkills.toList(),
-          'categories': _selectedCategories.toList(),
-          'startingPrice': _priceController.text.trim(),
-          'currency': _selectedCurrency,
-          'onboardingStep': 2,
-          'onboardingCompleted': true,
-        });
+        // 1. Update Cloud Firestore
+        try {
+          final price = double.tryParse(_priceController.text.trim()) ?? 0.0;
+          await FirebaseService.instance.userRepository.updateOnboardingProgress(
+            user.uid,
+            step: 2,
+            completed: true,
+          );
+          await FirebaseService.instance.freelancerRepository.updateSkills(
+            user.uid,
+            _selectedSkills.toList(),
+          );
+          await FirebaseService.instance.freelancerRepository.updateRate(
+            user.uid,
+            price,
+          );
+        } catch (_) {}
+
+        // 2. Mirror to Realtime Database
+        try {
+          await FirebaseService.instance.database
+              .ref('users/${user.uid}/profile')
+              .update({
+            'skills': _selectedSkills.toList(),
+            'categories': _selectedCategories.toList(),
+            'startingPrice': _priceController.text.trim(),
+            'currency': _selectedCurrency,
+            'onboardingStep': 2,
+            'onboardingCompleted': true,
+          });
+        } catch (_) {}
       }
 
       await Future.delayed(const Duration(milliseconds: 300));

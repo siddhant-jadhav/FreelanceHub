@@ -220,6 +220,20 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
               ),
             ),
           ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).pushNamed('/order-delivery');
+            },
+            child: Text(
+              'Full Delivery Studio',
+              style: GoogleFonts.inter(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
@@ -1396,12 +1410,15 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
                 ),
               ],
             ),
-            Text(
-              'View All ($_activeContractsCount)',
-              style: GoogleFonts.inter(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.primaryDark,
+            InkWell(
+              onTap: () => Navigator.of(context).pushNamed('/orders'),
+              child: Text(
+                'View All ($_activeContractsCount)',
+                style: GoogleFonts.inter(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.primaryDark,
+                ),
               ),
             ),
           ],
@@ -1974,6 +1991,8 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
       onTap: (index) {
         if (index == 1) {
           Navigator.of(context).pushNamed('/buyer-requests');
+        } else if (index == 2) {
+          Navigator.of(context).pushNamed('/orders');
         } else {
           setState(() => _currentBottomNavIndex = index);
         }

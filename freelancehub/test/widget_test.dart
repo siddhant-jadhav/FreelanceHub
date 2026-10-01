@@ -5,7 +5,10 @@ import 'package:freelancehub/screens/client_home_screen.dart';
 import 'package:freelancehub/screens/freelancer_dashboard_screen.dart';
 import 'package:freelancehub/screens/freelancer_onboarding_screen.dart';
 import 'package:freelancehub/screens/freelancer_onboarding_step2_screen.dart';
+import 'package:freelancehub/screens/freelancer_orders_screen.dart';
 import 'package:freelancehub/screens/login_screen.dart';
+import 'package:freelancehub/screens/order_delivery_screen.dart';
+import 'package:freelancehub/screens/send_offer_screen.dart';
 import 'package:freelancehub/screens/signup_screen.dart';
 import 'package:freelancehub/screens/splash_screen.dart';
 import 'package:flutter/material.dart';
@@ -117,6 +120,75 @@ void main() {
     expect(find.text('CLIENT'), findsOneWidget);
     expect(find.text('Explore Talent'), findsOneWidget);
     expect(find.text('Top Rated Freelancers'), findsOneWidget);
+    expect(find.text('Top Recommended For You'), findsOneWidget);
+    expect(find.text('Active Deliveries'), findsOneWidget);
+    expect(find.text('Find vetted experts or kickstart a project'), findsOneWidget);
+    expect(find.text('+ Post a Task'), findsOneWidget);
+    expect(find.text('AI Brief Writer'), findsOneWidget);
+    expect(find.text('Mobile App MVP (Fintech Flow)'), findsOneWidget);
+    expect(find.text('Sarah Jenkins'), findsOneWidget);
+    expect(find.text('David Chen'), findsOneWidget);
+    expect(find.text('Recently Saved Talent'), findsOneWidget);
+    expect(find.text('Review Submission'), findsOneWidget);
+  });
+
+  testWidgets('Client home screen interactive modals and actions test',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ClientHomeScreen(),
+      ),
+    );
+
+    // 1. Test Post a Task modal opens
+    final postTaskBtn = find.text('+ Post a Task');
+    await tester.tap(postTaskBtn);
+    await tester.pumpAndSettle();
+    expect(find.text('Post a Project Task'), findsOneWidget);
+    expect(find.text('Post Task to Opportunities'), findsOneWidget);
+
+    // Close Post Task modal
+    await tester.tap(find.byIcon(LucideIcons.x).last);
+    await tester.pumpAndSettle();
+
+    // 2. Test AI Brief Writer modal opens
+    final aiBriefBtn = find.text('AI Brief Writer');
+    await tester.tap(aiBriefBtn);
+    await tester.pumpAndSettle();
+    expect(find.text('AI Project Brief Assistant'), findsOneWidget);
+    expect(find.text('Generate Brief with AI'), findsOneWidget);
+
+    // Close AI Brief modal
+    await tester.tap(find.byIcon(LucideIcons.x).last);
+    await tester.pumpAndSettle();
+
+    // 3. Test Active Deliveries Workspace modal opens
+    final workspaceBtn = find.text('Workspace');
+    await tester.ensureVisible(workspaceBtn);
+    await tester.tap(workspaceBtn);
+    await tester.pumpAndSettle();
+    expect(find.text('ORDER #FH-9921 • FIXED PRICE'), findsOneWidget);
+    expect(find.text('Milestone Progress (3 of 4 Completed • 75%)'), findsOneWidget);
+
+    // Close Workspace modal
+    await tester.tap(find.byIcon(LucideIcons.x).last);
+    await tester.pumpAndSettle();
+
+    // 4. Test Review Submission modal opens and approves milestone
+    final reviewBtn = find.text('Review Submission');
+    await tester.ensureVisible(reviewBtn);
+    await tester.tap(reviewBtn);
+    await tester.pumpAndSettle();
+    expect(find.text('SUBMISSION REVIEW • MILESTONE 2'), findsOneWidget);
+    expect(find.text('Approve & Release'), findsOneWidget);
+
+    // Tap Approve & Release
+    await tester.tap(find.text('Approve & Release'));
+    await tester.pumpAndSettle();
+
+    // Banner should be removed after approval
+    expect(find.text('SUBMISSION REVIEW • MILESTONE 2'), findsNothing);
+    expect(find.text('Review Submission'), findsNothing);
   });
 
   testWidgets('Freelancer dashboard smoke test and contract rendering',
@@ -238,5 +310,188 @@ void main() {
     expect(find.text('Delivery (Days)'), findsOneWidget);
     expect(find.text('Submit Proposal (Uses 1 Offer)'), findsOneWidget);
   });
+
+  testWidgets('SendOfferScreen smoke and UI structure test',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SendOfferScreen(),
+      ),
+    );
+
+    // Verify App Bar
+    expect(find.text('Submit Proposal'), findsOneWidget);
+    expect(find.text('OFFER'), findsOneWidget);
+
+    // Verify Context Card
+    expect(find.text('BUYER REQUEST'), findsOneWidget);
+    expect(find.text('Verified Client'), findsOneWidget);
+    expect(find.text('Sarah Jenkins'), findsOneWidget);
+
+    // Verify Gig Selector
+    expect(find.text('Select Associated Gig'), findsOneWidget);
+    expect(find.text('Change Gig'), findsOneWidget);
+
+    // Verify Payment Type Switcher
+    expect(find.text('Payment Type'), findsOneWidget);
+    expect(find.text('Single Payment'), findsOneWidget);
+    expect(find.text('Milestones'), findsOneWidget);
+
+    // Verify Proposal Pitch section
+    expect(find.text('Proposal Pitch & Scope'), findsOneWidget);
+    expect(find.text('Refine with AI'), findsOneWidget);
+    expect(find.text('Add Portfolio Samples'), findsOneWidget);
+
+    // Verify Pricing & Timeline
+    expect(find.text('Offer Pricing & Timeline'), findsOneWidget);
+    expect(find.text('Offer Price (\$)'), findsOneWidget);
+    expect(find.text('Delivery Duration'), findsOneWidget);
+
+    // Verify Revisions
+    expect(find.text('Client Revisions'), findsOneWidget);
+    expect(find.text('Unlimited'), findsOneWidget);
+
+    // Verify Deliverables Grid (skipOffstage: false since scrollable)
+    expect(find.text('Source Files', skipOffstage: false), findsOneWidget);
+    expect(find.text('Commercial Use', skipOffstage: false), findsOneWidget);
+    expect(find.text('High Res', skipOffstage: false), findsOneWidget);
+    expect(find.text('Prototype', skipOffstage: false), findsOneWidget);
+
+    // Verify Sticky Footer
+    expect(find.text('Submit Custom Offer'), findsOneWidget);
+    expect(find.textContaining('Client Total:'), findsOneWidget);
+    expect(find.textContaining('You Earn:'), findsOneWidget);
+  });
+
+  testWidgets('SendOfferScreen milestones and submission test',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SendOfferScreen(),
+      ),
+    );
+
+    // Tap Milestones tab
+    await tester.tap(find.text('Milestones'));
+    await tester.pumpAndSettle();
+
+    // Verify milestones section appears
+    expect(find.textContaining('Project Milestones'), findsOneWidget);
+    expect(find.text('+ Add Milestone'), findsOneWidget);
+
+    // Submit Custom Offer
+    final submitBtn = find.text('Submit Custom Offer');
+    await tester.tap(submitBtn);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    // Verify Success Bottom Sheet appears
+    expect(find.text('Custom Offer Sent!'), findsOneWidget);
+    expect(find.text('Return to Opportunities'), findsOneWidget);
+  });
+
+  testWidgets('FreelancerOrdersScreen smoke, filter and navigation test',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: const FreelancerOrdersScreen(),
+        routes: {
+          '/order-delivery': (context) => const OrderDeliveryScreen(),
+        },
+      ),
+    );
+
+    // Verify App Bar & Badge
+    expect(find.text('Manage Orders'), findsOneWidget);
+    expect(find.text('DELIVERY'), findsOneWidget);
+
+    // Verify KPI Banner
+    expect(find.text('Active Orders'), findsOneWidget);
+    expect(find.text('In Escrow'), findsOneWidget);
+    expect(find.text('On-Time Rate'), findsOneWidget);
+
+    // Verify Filter Chips
+    expect(find.text('All (4)'), findsOneWidget);
+    expect(find.text('In Progress (2)'), findsOneWidget);
+    expect(find.text('In Revision (1)'), findsOneWidget);
+    expect(find.text('Completed (1)'), findsOneWidget);
+
+    // Verify Order cards
+    expect(find.text('Order #FH-9821'), findsOneWidget);
+    expect(find.text('Sarah Jenkins'), findsOneWidget);
+    expect(find.text('Deliver Work', skipOffstage: false), findsWidgets);
+
+    // Test Search Filter
+    await tester.enterText(find.byType(TextField), 'Marcus');
+    await tester.pump();
+    expect(find.text('Order #FH-9740'), findsOneWidget);
+    expect(find.text('Order #FH-9821'), findsNothing);
+
+    // Clear Search Filter
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pump();
+    expect(find.text('Order #FH-9821'), findsOneWidget);
+
+    // Tap "Deliver Work" on the first order to navigate to OrderDeliveryScreen
+    final deliverWorkBtn = find.text('Deliver Work').first;
+    await tester.tap(deliverWorkBtn);
+    await tester.pumpAndSettle();
+
+    // Verify navigated to OrderDeliveryScreen
+    expect(find.text('Order Details'), findsOneWidget);
+    expect(find.text('TIME REMAINING'), findsOneWidget);
+  });
+
+  testWidgets('OrderDeliveryScreen smoke and delivery submission test',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: OrderDeliveryScreen(),
+      ),
+    );
+
+    // Verify App Bar and Header
+    expect(find.text('Order Details'), findsOneWidget);
+    expect(find.text('Order #FH-9821'), findsOneWidget);
+    expect(find.text('FreelanceHub Pro'), findsOneWidget);
+
+    // Verify Countdown Banner
+    expect(find.text('TIME REMAINING'), findsOneWidget);
+    expect(find.text('Due Date'), findsOneWidget);
+
+    // Verify Client Summary
+    expect(find.text('Sarah Jenkins'), findsWidgets);
+    expect(find.text('Total Budget'), findsOneWidget);
+    expect(find.text('\$450.00'), findsOneWidget);
+
+    // Verify Client Brief & Assets
+    expect(find.text('Client Brief & Assets'), findsOneWidget);
+    expect(find.text('2 Files'), findsOneWidget);
+
+    // Verify Deliver Completed Work Section
+    expect(find.text('Deliver Completed Work'), findsWidgets);
+    expect(find.text('Upload Work (ZIP, PNG, Figma Link)'), findsOneWidget);
+    expect(find.text('FinTech_UI_v1.0_Final.zip'), findsOneWidget);
+    expect(find.text('Delivery Note to Buyer'), findsOneWidget);
+    expect(find.text('Add FreelanceHub Watermark'), findsOneWidget);
+
+    // Verify Quick Seller Actions
+    expect(find.text('Request Extension', skipOffstage: false), findsWidgets);
+    expect(find.text('Contact Sarah', skipOffstage: false), findsOneWidget);
+
+    // Submit Delivery (scroll into view and tap)
+    final deliverBtn = find.widgetWithText(ElevatedButton, 'Deliver Completed Work');
+    await tester.ensureVisible(deliverBtn);
+    await tester.tap(deliverBtn);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    // Verify Delivery Success Modal appears
+    expect(find.text('Delivered Successfully!'), findsOneWidget);
+    expect(find.text('Back to Orders List'), findsOneWidget);
+  });
 }
+
 

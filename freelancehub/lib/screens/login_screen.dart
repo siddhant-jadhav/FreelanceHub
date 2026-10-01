@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/errors/app_exception.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 
@@ -79,6 +80,14 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         Navigator.of(context).pushReplacementNamed('/client-home');
       }
+    } on AppException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: AppColors.error,
+        ),
+      );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
