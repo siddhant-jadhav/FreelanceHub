@@ -138,7 +138,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     // 2. Segmented Role Selector Pill
                     _buildRoleSegmentedControl(),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 12),
+
+                    // Quick Select Test Accounts
+                    _buildTestAccountsSection(),
+
+                    const SizedBox(height: 16),
 
                     // 3. Social Quick Logins
                     _buildSocialButtons(),
@@ -339,6 +344,118 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildTestAccountsSection() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.primaryLight.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.userCheck, size: 14, color: AppColors.primaryDark),
+              const SizedBox(width: 6),
+              Text(
+                'Select Verified Account:',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.primaryDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _selectedRole = LoginRole.client;
+                      _identifierController.text = 'vedant@gmail.com';
+                      _passwordController.text = 'password123';
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: _identifierController.text == 'vedant@gmail.com'
+                          ? AppColors.primary
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _identifierController.text == 'vedant@gmail.com'
+                            ? AppColors.primary
+                            : AppColors.border,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        'Vedant (Client)',
+                        style: GoogleFonts.inter(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: _identifierController.text == 'vedant@gmail.com'
+                              ? Colors.white
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _selectedRole = LoginRole.freelancer;
+                      _identifierController.text = 'siddhant@gmail.com';
+                      _passwordController.text = 'password123';
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: _identifierController.text == 'siddhant@gmail.com'
+                          ? AppColors.primary
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _identifierController.text == 'siddhant@gmail.com'
+                            ? AppColors.primary
+                            : AppColors.border,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        'Siddhant (Freelancer)',
+                        style: GoogleFonts.inter(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: _identifierController.text == 'siddhant@gmail.com'
+                              ? Colors.white
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

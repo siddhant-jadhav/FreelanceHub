@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
+import '../models/message_model.dart';
+import '../models/notification_model.dart';
+import '../models/project_model.dart';
 
 /// Model representing a recommended freelancer for client home.
 class FreelancerProfile {
@@ -117,15 +122,23 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
 
   // Search filter
   String _searchQuery = '';
+  ProjectModel? _realActiveProject;
+  StreamSubscription<List<ProjectModel>>? _projectsSub;
 
   @override
   void initState() {
     super.initState();
     _enforceClientRole();
     _initData();
+    _loadRealData();
   }
 
   void _initData() {
+    if (FirebaseConfig.instance.isInitialized) {
+      _freelancers = [];
+      _savedTalent = [];
+      return;
+    }
     _freelancers = [
       FreelancerProfile(
         id: 'f-1',
@@ -200,6 +213,57 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     ];
   }
 
+  void _loadRealData() async {
+    try {
+      if (!FirebaseConfig.instance.isInitialized) return;
+      final uid = FirebaseService.instance.currentUser?.uid;
+      if (uid != null) {
+        _projectsSub = FirebaseService.instance.projectRepository
+            .streamProjectsForClient(uid)
+            .listen((projects) {
+          if (!mounted) return;
+          setState(() {
+            try {
+              _realActiveProject = projects.firstWhere(
+                (p) => p.status == 'in_progress',
+                orElse: () => projects.first,
+              );
+            } catch (_) {
+              _realActiveProject = null;
+            }
+          });
+        });
+      }
+
+      final remoteFreelancers = await FirebaseService.instance.freelancerRepository.getTopRatedFreelancers(limit: 10);
+      if (mounted) {
+        setState(() {
+          _freelancers = remoteFreelancers.map((rf) {
+            final nameParts = rf.name.trim().split(' ');
+            final initials = nameParts.length > 1
+                ? '${nameParts[0][0]}${nameParts[1][0]}'.toUpperCase()
+                : (rf.name.isNotEmpty ? rf.name[0].toUpperCase() : 'FL');
+            return FreelancerProfile(
+              id: rf.id,
+              name: rf.name,
+              title: rf.title.isNotEmpty ? rf.title : 'Senior Flutter Developer',
+              rating: rf.rating.toStringAsFixed(1),
+              reviews: rf.reviewsCount.toString(),
+              hourlyRate: '\$${rf.hourlyRate.toStringAsFixed(0)}/hr',
+              badgeText: rf.isTopRated ? 'TOP RATED' : 'VETTED PRO',
+              bio: rf.bio.isNotEmpty ? rf.bio : 'Expert specialist ready to assist with your requirements.',
+              skills: rf.skills.isNotEmpty ? rf.skills : ['Flutter', 'Mobile'],
+              initials: initials,
+              highlights: rf.services.isNotEmpty ? rf.services : ['High Quality Delivery', 'Clean Code'],
+            );
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Real data loading notice: $e');
+    }
+  }
+
   /// Ensure only Client accounts can view this screen
   void _enforceClientRole() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -220,6 +284,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
 
   @override
   void dispose() {
+    _projectsSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -330,9 +395,36 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                             ],
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(LucideIcons.x, size: 20, color: AppColors.textSecondary),
-                          onPressed: () => Navigator.pop(ctx),
+                        Row(
+                          children: [
+                            TextButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                Navigator.of(context).pushNamed(
+                                  '/post-task',
+                                  arguments: {
+                                    'title': titleCtrl.text,
+                                    'description': scopeCtrl.text,
+                                    'budget': double.tryParse(budgetCtrl.text) ?? 500.0,
+                                    'category': selectedCat,
+                                  },
+                                );
+                              },
+                              icon: const Icon(LucideIcons.arrowUpRight, size: 14, color: AppColors.primary),
+                              label: Text(
+                                'Full Form',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(LucideIcons.x, size: 20, color: AppColors.textSecondary),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -521,7 +613,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
                           final title = titleCtrl.text.trim();
                           if (title.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -532,12 +624,46 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                             );
                             return;
                           }
+
+                          final scope = scopeCtrl.text.trim();
+                          final budget = double.tryParse(budgetCtrl.text.trim()) ?? 500.0;
+                          final days = timeline == '7 days' ? 7 : (timeline == '30 days' ? 30 : 14);
+                          final deadline = DateTime.now().add(Duration(days: days));
+
                           Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+                          String? createdTaskId;
+                          try {
+                            if (FirebaseConfig.instance.isInitialized) {
+                              createdTaskId = await FirebaseService.instance.clientService.postTask(
+                                title: title,
+                                description: scope.isNotEmpty ? scope : 'Looking for an expert to deliver $title.',
+                                category: selectedCat,
+                                budget: budget,
+                                deadline: deadline,
+                              );
+                            }
+                          } catch (e) {
+                            debugPrint('postTask error: $e');
+                          }
+
+                          if (!mounted) return;
+                          scaffoldMessenger.showSnackBar(
                             SnackBar(
                               content: Text('Task "$title" published to Live Buyer Requests!'),
                               backgroundColor: AppColors.primary,
                               behavior: SnackBarBehavior.floating,
+                              action: SnackBarAction(
+                                label: 'View Proposals',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  Navigator.of(context).pushNamed(
+                                    '/task-details',
+                                    arguments: createdTaskId,
+                                  );
+                                },
+                              ),
                             ),
                           );
                         },
@@ -828,10 +954,13 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         child: OutlinedButton.icon(
                           onPressed: () {
                             Navigator.pop(ctx);
-                            _showPostTaskModal(
-                              initialTitle: generatedBrief!['title'],
-                              initialScope: generatedBrief!['scope'],
-                              initialBudget: generatedBrief!['budget'],
+                            Navigator.of(context).pushNamed(
+                              '/post-task',
+                              arguments: {
+                                'title': generatedBrief!['title'],
+                                'description': generatedBrief!['scope'],
+                                'budget': double.tryParse(generatedBrief!['budget'] ?? '500') ?? 500.0,
+                              },
                             );
                           },
                           icon: const Icon(LucideIcons.arrowRight, size: 16, color: AppColors.primaryDark),
@@ -1071,7 +1200,34 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                 'Due Tomorrow, 6:00 PM (\$400 in Escrow)',
                 isDone: false,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 42,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.of(context).pushNamed(
+                      '/task-details',
+                      arguments: _realActiveProject?.taskId,
+                    );
+                  },
+                  icon: const Icon(LucideIcons.listFilter, size: 16, color: AppColors.textPrimary),
+                  label: Text(
+                    'View Task & Candidate Proposals',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.border),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
@@ -1101,11 +1257,14 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     child: ElevatedButton.icon(
                       onPressed: () {
                         Navigator.pop(ctx);
-                        Navigator.of(context).pushNamed('/order-delivery');
+                        Navigator.of(context).pushNamed(
+                          '/project-workspace',
+                          arguments: _realActiveProject,
+                        );
                       },
-                      icon: const Icon(LucideIcons.fileCheck, size: 16, color: Colors.white),
+                      icon: const Icon(LucideIcons.briefcase, size: 16, color: Colors.white),
                       label: Text(
-                        'Delivery Files',
+                        'Open Workspace',
                         style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
                       ),
                       style: ElevatedButton.styleFrom(
@@ -1302,9 +1461,45 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                 width: double.infinity,
                 height: 46,
                 child: ElevatedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    final scaffoldMessenger = ScaffoldMessenger.of(context);
+                    final note = noteCtrl.text.trim();
+                    try {
+                      if (FirebaseConfig.instance.isInitialized) {
+                        final currentUid = FirebaseService.instance.currentUser?.uid;
+                        final currentName = FirebaseService.instance.currentUser?.displayName ?? 'Client';
+                        if (currentUid != null) {
+                          final convId = await FirebaseService.instance.messageRepository.getOrCreateConversation(
+                            currentUserId: currentUid,
+                            currentUserName: currentName,
+                            recipientUserId: freelancer.id,
+                            recipientUserName: freelancer.name,
+                          );
+                          await FirebaseService.instance.messageRepository.sendMessage(
+                            MessageModel(
+                              id: '',
+                              conversationId: convId,
+                              senderId: currentUid,
+                              receiverId: freelancer.id,
+                              message: note,
+                              createdAt: DateTime.now(),
+                            ),
+                          );
+                          await FirebaseService.instance.notificationService.notifyNewMessage(
+                            recipientUserId: freelancer.id,
+                            senderName: currentName,
+                            messageSnippet: note,
+                            conversationId: convId,
+                          );
+                        }
+                      }
+                    } catch (e) {
+                      debugPrint('hire invitation notice: $e');
+                    }
+
+                    if (!mounted) return;
+                    scaffoldMessenger.showSnackBar(
                       SnackBar(
                         content: Text('Invitation sent to ${freelancer.name}! They will reply shortly.'),
                         backgroundColor: AppColors.primary,
@@ -1599,8 +1794,25 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         Navigator.pop(ctx);
+                        try {
+                          if (FirebaseConfig.instance.isInitialized) {
+                            await FirebaseService.instance.clientService.reviewMilestoneDeliverable(
+                              projectId: 'project_ecommerce_9921',
+                              milestoneId: 'milestone_2',
+                              freelancerId: 'freelancer_marcus_vance',
+                              milestoneTitle: 'Milestone 2',
+                              amount: 350.0,
+                              approved: false,
+                              feedback: 'Revision requested by client.',
+                            );
+                          }
+                        } catch (e) {
+                          debugPrint('milestone revision error: $e');
+                        }
+
+                        if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Revision request sent to Marcus Vance.'),
@@ -1625,11 +1837,27 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         Navigator.pop(ctx);
                         setState(() {
                           _showActionNeededBanner = false;
                         });
+                        try {
+                          if (FirebaseConfig.instance.isInitialized) {
+                            await FirebaseService.instance.clientService.reviewMilestoneDeliverable(
+                              projectId: 'project_ecommerce_9921',
+                              milestoneId: 'milestone_2',
+                              freelancerId: 'freelancer_marcus_vance',
+                              milestoneTitle: 'Milestone 2',
+                              amount: 350.0,
+                              approved: true,
+                            );
+                          }
+                        } catch (e) {
+                          debugPrint('milestone approval error: $e');
+                        }
+
+                        if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Milestone 2 approved! \$350 released from escrow.'),
@@ -1813,6 +2041,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
+        final uid = FirebaseService.instance.currentUser?.uid;
         return Container(
           padding: const EdgeInsets.all(20),
           decoration: const BoxDecoration(
@@ -1852,24 +2081,86 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              _buildNotificationItem(
-                icon: LucideIcons.badgeCheck,
-                title: 'Milestone Submitted for Review',
-                subtitle: 'Marcus Vance submitted Milestone 2 on "E-Commerce Redesign".',
-                time: '2h ago',
-              ),
-              _buildNotificationItem(
-                icon: LucideIcons.shieldCheck,
-                title: 'Escrow Deposit Confirmed',
-                subtitle: 'Order #FH-9921 funds (\$1,800) are securely locked in FreelanceHub escrow.',
-                time: '1d ago',
-              ),
-              _buildNotificationItem(
-                icon: LucideIcons.messageSquare,
-                title: 'New Message from Alex Rivera',
-                subtitle: '"Just uploaded the latest test build to Firebase App Distribution."',
-                time: '2d ago',
-              ),
+              if (FirebaseConfig.instance.isInitialized && uid != null)
+                StreamBuilder<List<NotificationModel>>(
+                  stream: FirebaseService.instance.notificationRepository.streamUserNotifications(uid),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+                    }
+                    final notifications = snapshot.data ?? [];
+                    if (notifications.isEmpty) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 32),
+                          child: Column(
+                            children: [
+                              const Icon(LucideIcons.bellOff, size: 36, color: AppColors.textSecondary),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No notifications yet',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    return Column(
+                      children: notifications.map((notif) {
+                        IconData icon;
+                        switch (notif.type) {
+                          case 'new_proposal':
+                          case 'proposal_accepted':
+                            icon = LucideIcons.badgeCheck;
+                            break;
+                          case 'new_message':
+                            icon = LucideIcons.messageSquare;
+                            break;
+                          case 'escrow_funded':
+                          case 'payment_released':
+                            icon = LucideIcons.shieldCheck;
+                            break;
+                          default:
+                            icon = LucideIcons.bell;
+                        }
+                        final diff = DateTime.now().difference(notif.createdAt);
+                        String timeStr = diff.inMinutes < 60
+                            ? '${diff.inMinutes}m ago'
+                            : (diff.inHours < 24 ? '${diff.inHours}h ago' : '${diff.inDays}d ago');
+                        return _buildNotificationItem(
+                          icon: icon,
+                          title: notif.title,
+                          subtitle: notif.message,
+                          time: timeStr,
+                        );
+                      }).toList(),
+                    );
+                  },
+                )
+              else ...[
+                _buildNotificationItem(
+                  icon: LucideIcons.badgeCheck,
+                  title: 'Milestone Submitted for Review',
+                  subtitle: 'Deliverable submitted on your active project.',
+                  time: '2h ago',
+                ),
+                _buildNotificationItem(
+                  icon: LucideIcons.shieldCheck,
+                  title: 'Escrow Deposit Confirmed',
+                  subtitle: 'Funds are securely locked in FreelanceHub escrow.',
+                  time: '1d ago',
+                ),
+              ],
             ],
           ),
         );
@@ -2377,7 +2668,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                           shape: BoxShape.circle,
                         ),
                         child: Text(
-                          '1',
+                          _realActiveProject != null ? '1' : (FirebaseConfig.instance.isInitialized ? '0' : '1'),
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -2413,6 +2704,59 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
               const SizedBox(height: 10),
 
               // Active Project Card (Order #FH-9921)
+              if (_realActiveProject == null && FirebaseConfig.instance.isInitialized)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        const Icon(LucideIcons.folderOpen, size: 32, color: AppColors.textSecondary),
+                        const SizedBox(height: 8),
+                        Text(
+                          'No Active Projects Yet',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Post a task to receive proposals and kick off work.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: () => Navigator.pushNamed(context, '/post-task'),
+                          icon: const Icon(LucideIcons.plus, size: 16, color: Colors.white),
+                          label: Text(
+                            'Post a Task',
+                            style: GoogleFonts.inter(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -2441,7 +2785,9 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                             border: Border.all(color: AppColors.border),
                           ),
                           child: Text(
-                            'FIXED PRICE • ORDER #FH-9921',
+                            _realActiveProject != null
+                                ? 'FIXED PRICE • ORDER #${_realActiveProject!.id.length > 7 ? _realActiveProject!.id.substring(0, 7).toUpperCase() : _realActiveProject!.id}'
+                                : 'FIXED PRICE • ORDER #FH-9921',
                             style: GoogleFonts.inter(
                               fontSize: 10.5,
                               fontWeight: FontWeight.w700,
@@ -2462,7 +2808,9 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              'In Progress',
+                              _realActiveProject != null
+                                  ? (_realActiveProject!.status == 'in_progress' ? 'In Progress' : _realActiveProject!.status.replaceAll('_', ' ').toUpperCase())
+                                  : 'In Progress',
                               style: GoogleFonts.inter(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -2475,7 +2823,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Mobile App MVP (Fintech Flow)',
+                      _realActiveProject?.title ?? 'Mobile App MVP (Fintech Flow)',
                       style: GoogleFonts.inter(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -2487,14 +2835,18 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Milestones: 3 of 4 completed',
+                          _realActiveProject != null
+                              ? 'Milestones: ${_realActiveProject!.completedMilestones} of ${_realActiveProject!.totalMilestones} completed'
+                              : 'Milestones: 3 of 4 completed',
                           style: GoogleFonts.inter(
                             fontSize: 11.5,
                             color: AppColors.textSecondary,
                           ),
                         ),
                         Text(
-                          '75%',
+                          _realActiveProject != null
+                              ? '${(_realActiveProject!.progress * 100).toInt()}%'
+                              : '75%',
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
@@ -2506,11 +2858,11 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     const SizedBox(height: 6),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
-                      child: const LinearProgressIndicator(
-                        value: 0.75,
+                      child: LinearProgressIndicator(
+                        value: _realActiveProject?.progress ?? 0.75,
                         minHeight: 6,
                         backgroundColor: AppColors.surfaceContainer,
-                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                        valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -2528,7 +2880,11 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                                 radius: 18,
                                 backgroundColor: AppColors.primaryLight,
                                 child: Text(
-                                  'AR',
+                                  _realActiveProject != null && _realActiveProject!.freelancerName.isNotEmpty
+                                      ? (_realActiveProject!.freelancerName.trim().split(' ').length > 1
+                                          ? '${_realActiveProject!.freelancerName.trim().split(' ')[0][0]}${_realActiveProject!.freelancerName.trim().split(' ')[1][0]}'.toUpperCase()
+                                          : _realActiveProject!.freelancerName.trim()[0].toUpperCase())
+                                      : 'AR',
                                   style: GoogleFonts.inter(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w700,
@@ -2556,7 +2912,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Alex Rivera',
+                                  _realActiveProject?.freelancerName ?? 'Alex Rivera',
                                   style: GoogleFonts.inter(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
@@ -2564,7 +2920,9 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                                   ),
                                 ),
                                 Text(
-                                  'Due: Tomorrow, 6:00 PM',
+                                  _realActiveProject != null
+                                      ? 'Due: ${_realActiveProject!.dueDate.month}/${_realActiveProject!.dueDate.day}'
+                                      : 'Due: Tomorrow, 6:00 PM',
                                   style: GoogleFonts.inter(
                                     fontSize: 11,
                                     color: AppColors.textSecondary,
@@ -2801,6 +3159,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
               const SizedBox(height: 24),
 
               // 7. Recently Saved Talent Mini-Deck
+              if (_savedTalent.isNotEmpty) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -2847,6 +3206,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
               ),
 
               const SizedBox(height: 24),
+              ],
 
               // 8. Recent Activity Feed Banner (Action Needed)
               if (_showActionNeededBanner) ...[
@@ -2999,14 +3359,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
         onTap: (index) {
           setState(() => _selectedNavIndex = index);
           if (index == 2) {
-            _showWorkspaceModal();
-          } else if (index == 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Client Messages: 2 active freelancer conversations.'),
-                behavior: SnackBarBehavior.floating,
-              ),
+            Navigator.of(context).pushNamed(
+              '/project-workspace',
+              arguments: _realActiveProject,
             );
+          } else if (index == 3) {
+            Navigator.of(context).pushNamed('/messages');
           }
         },
         backgroundColor: Colors.white,
@@ -3023,23 +3381,23 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.house, size: 20),
+            icon: Icon(LucideIcons.house, size: 24),
             label: 'Home',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.compass, size: 20),
+            icon: Icon(LucideIcons.compass, size: 24),
             label: 'Explore',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.briefcase, size: 20),
+            icon: Icon(LucideIcons.briefcase, size: 24),
             label: 'Projects',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.messageSquare, size: 20),
+            icon: Icon(LucideIcons.messageSquare, size: 24),
             label: 'Messages',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.user, size: 20),
+            icon: Icon(LucideIcons.user, size: 24),
             label: 'Profile',
           ),
         ],

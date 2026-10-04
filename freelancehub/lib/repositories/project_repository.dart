@@ -60,6 +60,21 @@ class ProjectRepository {
     });
   }
 
+  /// Get projects list for a client
+  Future<List<ProjectModel>> getProjectsForClient(String clientId) async {
+    try {
+      final snapshot = await _projects
+          .where('clientId', isEqualTo: clientId)
+          .orderBy('startedDate', descending: true)
+          .get();
+      return snapshot.docs
+          .map((doc) => ProjectModel.fromFirestore(doc))
+          .toList();
+    } catch (e) {
+      throw AppException.from(e);
+    }
+  }
+
   /// Stream projects for a freelancer
   Stream<List<ProjectModel>> streamProjectsForFreelancer(String freelancerId) {
     return _projects

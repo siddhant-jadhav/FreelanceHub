@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 import '../models/order_model.dart';
+import '../models/project_model.dart';
 
 /// Freelancer Orders Listing Screen.
 /// Lists all active and historical client deliveries/orders with filtering,
@@ -19,6 +22,7 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedFilter = 'All'; // 'All', 'In Progress', 'In Revision', 'Completed'
   late List<FreelanceOrder> _orders;
+  StreamSubscription<List<ProjectModel>>? _ordersSub;
 
   @override
   void initState() {
@@ -29,6 +33,7 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
 
   @override
   void dispose() {
+    _ordersSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -48,7 +53,69 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
     });
   }
 
+  void _listenToFreelancerOrders() {
+    if (!FirebaseConfig.instance.isInitialized) return;
+    final uid = FirebaseService.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      _ordersSub = FirebaseService.instance.projectRepository
+          .streamProjectsForFreelancer(uid)
+          .listen((projects) {
+        if (!mounted) return;
+        setState(() {
+          _orders = projects.map((p) {
+            final totalDuration = p.dueDate.difference(p.startedDate).inDays.clamp(1, 120);
+            final progress = p.progress > 0 ? p.progress : (p.completedMilestones / (p.totalMilestones > 0 ? p.totalMilestones : 1));
+
+            OrderStatus status = OrderStatus.inProgress;
+            if (p.status == 'completed') {
+              status = OrderStatus.completed;
+            } else if (p.status == 'review') {
+              status = OrderStatus.delivered;
+            } else if (p.status == 'revision') {
+              status = OrderStatus.inRevision;
+            }
+
+            return FreelanceOrder(
+              id: p.id.startsWith('FH-') ? p.id : 'FH-${p.id.length > 5 ? p.id.substring(0, 5).toUpperCase() : p.id.toUpperCase()}',
+              clientName: p.clientName.isNotEmpty ? p.clientName : 'Client',
+              clientCompany: 'Verified Client',
+              clientCountry: 'United States',
+              isClientVerified: true,
+              clientRating: 5.0,
+              gigTitle: p.title,
+              gigTier: 'Custom Contract',
+              budget: p.budget,
+              startedDate: p.startedDate,
+              dueDate: p.dueDate,
+              totalDays: totalDuration,
+              progressPercent: progress.clamp(0.0, 1.0),
+              status: status,
+              clientBrief: 'Project active under Escrow Protection.',
+              briefFiles: const [],
+              timeline: [
+                OrderTimelineEvent(
+                  title: 'Order started by ${p.clientName.isNotEmpty ? p.clientName : 'Client'}',
+                  time: 'Active',
+                ),
+              ],
+            );
+          }).toList();
+        });
+      }, onError: (e) {
+        debugPrint('Error streaming freelancer orders: $e');
+      });
+    } catch (e) {
+      debugPrint('Notice streaming freelancer orders: $e');
+    }
+  }
+
   void _initializeOrders() {
+    if (FirebaseConfig.instance.isInitialized) {
+      _orders = [];
+      _listenToFreelancerOrders();
+      return;
+    }
     final now = DateTime.now();
     _orders = [
       // Order 1: Sarah Jenkins (Matches Stitch reference screen!)

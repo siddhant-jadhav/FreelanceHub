@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
+import '../models/payment_model.dart';
+import '../models/project_model.dart';
 
 /// Contract Status definition
 enum ContractStatus {
@@ -75,16 +79,25 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
   bool _isAvailableForWork = true;
 
   double _availableWithdrawal = 1280.00;
-  final double _earnedThisMonth = 3450.00;
-  final double _pendingClearance = 940.00;
+  double _earnedThisMonth = 3450.00;
+  double _pendingClearance = 940.00;
 
   late List<FreelancerContract> _contracts;
+  StreamSubscription<List<ProjectModel>>? _projectsSub;
+  StreamSubscription<List<PaymentModel>>? _paymentsSub;
 
   @override
   void initState() {
     super.initState();
     _enforceFreelancerRole();
     _initializeContracts();
+  }
+
+  @override
+  void dispose() {
+    _projectsSub?.cancel();
+    _paymentsSub?.cancel();
+    super.dispose();
   }
 
   void _enforceFreelancerRole() {
@@ -102,29 +115,108 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
     });
   }
 
+  void _listenToFreelancerProjects() {
+    if (!FirebaseConfig.instance.isInitialized) return;
+    final uid = FirebaseService.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      _projectsSub = FirebaseService.instance.projectRepository
+          .streamProjectsForFreelancer(uid)
+          .listen((projects) {
+        if (!mounted) return;
+        setState(() {
+          _contracts = projects.map((p) {
+            final dueDiff = p.dueDate.difference(DateTime.now()).inDays;
+            return FreelancerContract(
+              id: p.id,
+              orderNumber: 'Order #${p.id.length > 5 ? p.id.substring(0, 5).toUpperCase() : p.id.toUpperCase()}',
+              title: p.title,
+              clientName: p.clientName.isNotEmpty ? p.clientName : 'Client',
+              amount: p.budget,
+              deliveryTimeText: dueDiff > 0 ? 'Delivery in ${dueDiff}d' : 'Due today',
+              status: p.status == 'completed'
+                  ? ContractStatus.completed
+                  : (p.status == 'review'
+                      ? ContractStatus.delivered
+                      : (p.status == 'revision'
+                          ? ContractStatus.needsRevision
+                          : ContractStatus.inProgress)),
+              revisionReason: p.status == 'revision' ? 'Client requested adjustments' : null,
+            );
+          }).toList();
+        });
+      }, onError: (e) {
+        debugPrint('Error streaming freelancer projects: $e');
+      });
+    } catch (e) {
+      debugPrint('Notice streaming freelancer projects: $e');
+    }
+  }
+
+  void _listenToFreelancerPayments() {
+    if (!FirebaseConfig.instance.isInitialized) return;
+    final uid = FirebaseService.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      _paymentsSub = FirebaseService.instance.paymentRepository
+          .streamUserPayments(uid, isClient: false)
+          .listen((payments) {
+        if (!mounted) return;
+        double released = 0.0;
+        double pending = 0.0;
+        for (final p in payments) {
+          if (p.status == 'released') {
+            released += p.amount;
+          } else if (p.status == 'held_in_escrow') {
+            pending += p.amount;
+          }
+        }
+        setState(() {
+          _availableWithdrawal = released;
+          _earnedThisMonth = released;
+          _pendingClearance = pending;
+        });
+      }, onError: (e) {
+        debugPrint('Error streaming payments: $e');
+      });
+    } catch (e) {
+      debugPrint('Notice streaming payments: $e');
+    }
+  }
+
   void _initializeContracts() {
-    _contracts = [
-      const FreelancerContract(
-        id: 'ord_1',
-        orderNumber: 'Order #FH-8821',
-        title: 'TechCorp SaaS Brand Identity',
-        clientName: 'TechCorp Inc.',
-        amount: 450.00,
-        deliveryTimeText: 'Delivery in 1d 14h',
-        status: ContractStatus.inProgress,
-      ),
-      const FreelancerContract(
-        id: 'ord_2',
-        orderNumber: 'Order #FH-9154',
-        title: 'Mobile UI Kit Components',
-        clientName: 'Apex Labs',
-        amount: 380.00,
-        deliveryTimeText: 'Buyer requested adjustments',
-        status: ContractStatus.needsRevision,
-        revisionReason:
-            'Please update dark mode tokens and add 3 additional checkout state variants.',
-      ),
-    ];
+    if (FirebaseConfig.instance.isInitialized) {
+      _contracts = [];
+      _availableWithdrawal = 0.0;
+      _earnedThisMonth = 0.0;
+      _pendingClearance = 0.0;
+      _listenToFreelancerProjects();
+      _listenToFreelancerPayments();
+    } else {
+      // In standalone widget tests where Firebase is uninitialized
+      _contracts = [
+        const FreelancerContract(
+          id: 'ord_1',
+          orderNumber: 'Order #FH-8821',
+          title: 'TechCorp SaaS Brand Identity',
+          clientName: 'TechCorp Inc.',
+          amount: 450.00,
+          deliveryTimeText: 'Delivery in 1d 14h',
+          status: ContractStatus.inProgress,
+        ),
+        const FreelancerContract(
+          id: 'ord_2',
+          orderNumber: 'Order #FH-9154',
+          title: 'Mobile UI Kit Components',
+          clientName: 'Apex Labs',
+          amount: 380.00,
+          deliveryTimeText: 'Buyer requested adjustments',
+          status: ContractStatus.needsRevision,
+          revisionReason:
+              'Please update dark mode tokens and add 3 additional checkout state variants.',
+        ),
+      ];
+    }
   }
 
   /// Calculates total active queue valuation dynamically from open contracts

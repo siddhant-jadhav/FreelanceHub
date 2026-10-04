@@ -238,4 +238,114 @@ class AuthService {
       throw AppException.from(e);
     }
   }
+
+  /// Automatically provisions the only two application accounts in Firebase Auth & Firestore
+  /// Client: vedant@gmail.com
+  /// Freelancer: siddhant@gmail.com
+  Future<void> ensureDefaultUsersProvisioned() async {
+    final originalUser = currentUser;
+    try {
+      // 1. Provision Vedant (Client)
+      String? vedantUid;
+      try {
+        final clientCred = await _auth.createUserWithEmailAndPassword(
+          email: 'vedant@gmail.com',
+          password: 'password123',
+        );
+        vedantUid = clientCred.user?.uid;
+        await clientCred.user?.updateDisplayName('Vedant');
+      } catch (e) {
+        try {
+          final loginCred = await _auth.signInWithEmailAndPassword(
+            email: 'vedant@gmail.com',
+            password: 'password123',
+          );
+          vedantUid = loginCred.user?.uid;
+        } catch (_) {}
+      }
+
+      if (vedantUid != null) {
+        await _firestore.collection('users').doc(vedantUid).set({
+          'uid': vedantUid,
+          'fullName': 'Vedant',
+          'email': 'vedant@gmail.com',
+          'role': 'client',
+          'profileCompleted': true,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await _firestore.collection('clients').doc(vedantUid).set({
+          'userId': vedantUid,
+          'name': 'Vedant',
+          'company': 'Tech Ventures',
+          'country': 'India',
+          'isVerified': true,
+          'totalSpent': 0.0,
+          'activeProjectsCount': 0,
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      // 2. Provision Siddhant (Freelancer)
+      String? siddhantUid;
+      try {
+        final freelancerCred = await _auth.createUserWithEmailAndPassword(
+          email: 'siddhant@gmail.com',
+          password: 'password123',
+        );
+        siddhantUid = freelancerCred.user?.uid;
+        await freelancerCred.user?.updateDisplayName('Siddhant');
+      } catch (e) {
+        try {
+          final loginCred = await _auth.signInWithEmailAndPassword(
+            email: 'siddhant@gmail.com',
+            password: 'password123',
+          );
+          siddhantUid = loginCred.user?.uid;
+        } catch (_) {}
+      }
+
+      if (siddhantUid != null) {
+        await _firestore.collection('users').doc(siddhantUid).set({
+          'uid': siddhantUid,
+          'fullName': 'Siddhant',
+          'email': 'siddhant@gmail.com',
+          'role': 'freelancer',
+          'profileCompleted': true,
+          'onboardingCompleted': true,
+          'onboardingStep': 2,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await _firestore.collection('freelancers').doc(siddhantUid).set({
+          'userId': siddhantUid,
+          'name': 'Siddhant',
+          'title': 'Senior Flutter & Full-Stack Developer',
+          'bio': 'Specializing in cross-platform Flutter applications, clean architecture, and real-time Firebase backends.',
+          'skills': ['Flutter', 'Dart', 'Firebase', 'State Management', 'REST API'],
+          'services': ['Mobile App Engineering', 'Full Stack Integration'],
+          'hourlyRate': 50.0,
+          'rating': 5.0,
+          'reviewsCount': 0,
+          'completedOrders': 0,
+          'isTopRated': true,
+          'availability': 'available',
+          'portfolio': [],
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      // Restore session if user was previously signed in, or sign out if no user was signed in
+      if (originalUser != null && originalUser.email != null) {
+        // Leave as is or re-authenticate if needed
+      } else {
+        await _auth.signOut();
+        _currentRole = null;
+      }
+    } catch (e) {
+      debugPrint('ensureDefaultUsersProvisioned error: $e');
+    }
+  }
 }

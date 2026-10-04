@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 
 /// Splash Screen featuring centered brand identity:
@@ -64,10 +65,21 @@ class _SplashScreenState extends State<SplashScreen>
         Timer(const Duration(milliseconds: 2500), _navigateToNext);
   }
 
-  void _navigateToNext() {
+  void _navigateToNext() async {
     _navigationTimer?.cancel();
-    if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/signup');
+    if (!mounted) return;
+
+    final user = FirebaseService.instance.currentUser;
+    if (user != null) {
+      final role = await FirebaseService.instance.getUserRole(user.uid);
+      if (!mounted) return;
+      if (role == 'freelancer') {
+        Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
+      } else {
+        Navigator.of(context).pushReplacementNamed('/client-home');
+      }
+    } else {
+      Navigator.of(context).pushReplacementNamed('/login');
     }
   }
 

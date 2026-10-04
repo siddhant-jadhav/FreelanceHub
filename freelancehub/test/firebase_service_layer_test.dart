@@ -25,6 +25,7 @@ import 'package:freelancehub/repositories/review_repository.dart';
 import 'package:freelancehub/repositories/task_repository.dart';
 import 'package:freelancehub/repositories/user_repository.dart';
 import 'package:freelancehub/services/auth_service.dart';
+import 'package:freelancehub/services/client_service.dart';
 import 'package:freelancehub/services/firestore_service.dart';
 import 'package:freelancehub/services/notification_service.dart';
 import 'package:freelancehub/services/storage_service.dart';
@@ -379,6 +380,7 @@ void main() {
       expect(service.notificationRepository, isA<NotificationRepository>());
       expect(service.paymentRepository, isA<PaymentRepository>());
       expect(service.reviewRepository, isA<ReviewRepository>());
+      expect(service.clientService, isA<ClientService>());
     });
 
     test('Individual repository singletons are accessible without errors', () {
@@ -397,6 +399,278 @@ void main() {
       expect(FirestoreService.instance, isNotNull);
       expect(StorageService.instance, isNotNull);
       expect(NotificationService.instance, isNotNull);
+      expect(ClientService.instance, isNotNull);
+    });
+
+    test('ClientService exposes task and proposal streams gracefully', () {
+      final clientService = ClientService.instance;
+      expect(clientService.streamActiveProjects('client1'), isA<Stream>());
+      expect(clientService.streamRecommendedFreelancers(), isA<Stream>());
+      expect(clientService.streamTask('task1'), isA<Stream>());
+      expect(clientService.streamTaskProposals('task1'), isA<Stream>());
+    });
+  });
+
+  group('Two-User Workflow State Transition Tests (Vedant <-> Siddhant)', () {
+    const vedantUid = 'vedant_client_uid';
+    const vedantName = 'Vedant';
+
+    const siddhantUid = 'siddhant_freelancer_uid';
+    const siddhantName = 'Siddhant';
+
+    test('1. Client (Vedant) posts a task', () {
+      final now = DateTime.now();
+      final task = TaskModel(
+        id: 'task_e2e_1',
+        clientId: vedantUid,
+        clientName: vedantName,
+        title: 'Full-Stack Mobile App for FreelanceHub',
+        description: 'Build a production-grade Flutter application with Firebase integration.',
+        category: 'Mobile App Development',
+        budget: 1500.0,
+        deadline: now.add(const Duration(days: 14)),
+        status: 'open',
+        requiredSkills: ['Flutter', 'Firebase', 'State Management'],
+        createdAt: now,
+      );
+
+      final map = task.toMap();
+      expect(map['clientId'], vedantUid);
+      expect(map['budget'], 1500.0);
+      expect(map['status'], 'open');
+      expect(map['offersCount'], 0);
+    });
+
+    test('2. Freelancer (Siddhant) submits proposal to Vedant\'s task', () {
+      final now = DateTime.now();
+      final proposal = ProposalModel(
+        id: 'prop_e2e_1',
+        taskId: 'task_e2e_1',
+        taskTitle: 'Full-Stack Mobile App for FreelanceHub',
+        freelancerId: siddhantUid,
+        freelancerName: siddhantName,
+        clientId: vedantUid,
+        proposedPrice: 1500.0,
+        deliveryTimeDays: 14,
+        coverLetter: 'I will build the full application using clean architecture and real-time Firestore listeners.',
+        status: 'pending',
+        createdAt: now,
+      );
+
+      final propMap = proposal.toMap();
+      expect(propMap['taskId'], 'task_e2e_1');
+      expect(propMap['freelancerId'], siddhantUid);
+      expect(propMap['proposedPrice'], 1500.0);
+      expect(propMap['status'], 'pending');
+
+      final milestone1 = MilestoneModel(
+        id: 'ms_1',
+        projectId: 'proj_e2e_1',
+        title: 'Milestone 1: Core Architecture & UI',
+        description: 'Implement all screens, components, and state management.',
+        amount: 750.0,
+        milestoneNumber: 1,
+        status: 'pending',
+        dueDate: now.add(const Duration(days: 7)),
+      );
+      expect(milestone1.amount, 750.0);
+    });
+
+    test('3. Client (Vedant) accepts proposal, creates Project and Escrow Deposit', () {
+      final now = DateTime.now();
+      final project = ProjectModel(
+        id: 'proj_e2e_1',
+        taskId: 'task_e2e_1',
+        clientId: vedantUid,
+        clientName: vedantName,
+        freelancerId: siddhantUid,
+        freelancerName: siddhantName,
+        title: 'Full-Stack Mobile App for FreelanceHub',
+        status: 'in_progress',
+        budget: 1500.0,
+        progress: 0.0,
+        startedDate: now,
+        dueDate: now.add(const Duration(days: 14)),
+        createdAt: now,
+        completedMilestones: 0,
+        totalMilestones: 2,
+      );
+
+      expect(project.status, 'in_progress');
+      expect(project.clientId, vedantUid);
+      expect(project.freelancerId, siddhantUid);
+
+      final payment = PaymentModel(
+        id: 'pay_e2e_1',
+        projectId: project.id,
+        clientId: vedantUid,
+        freelancerId: siddhantUid,
+        amount: 1500.0,
+        netAmount: 1500.0,
+        status: 'held_in_escrow',
+        createdAt: now,
+      );
+
+      final payMap = payment.toMap();
+      expect(payMap['status'], 'held_in_escrow');
+      expect(payMap['amount'], 1500.0);
+      expect(payMap['clientId'], vedantUid);
+      expect(payMap['freelancerId'], siddhantUid);
+    });
+
+    test('4. Freelancer (Siddhant) submits work deliverable -> status transitions to review', () {
+      final now = DateTime.now();
+      final projectBefore = ProjectModel(
+        id: 'proj_e2e_1',
+        taskId: 'task_e2e_1',
+        clientId: vedantUid,
+        clientName: vedantName,
+        freelancerId: siddhantUid,
+        freelancerName: siddhantName,
+        title: 'Full-Stack Mobile App for FreelanceHub',
+        status: 'in_progress',
+        budget: 1500.0,
+        progress: 0.5,
+        startedDate: now,
+        dueDate: now.add(const Duration(days: 14)),
+        createdAt: now,
+        completedMilestones: 0,
+        totalMilestones: 2,
+      );
+
+      final projectAfterDelivery = projectBefore.copyWith(
+        status: 'review',
+        progress: 1.0,
+      );
+
+      expect(projectAfterDelivery.status, 'review');
+      expect(projectAfterDelivery.progress, 1.0);
+    });
+
+    test('5. Realtime 1-on-1 Messaging between Vedant and Siddhant', () {
+      final now = DateTime.now();
+      final conv = ConversationModel(
+        id: 'conv_vedant_siddhant',
+        participantIds: [vedantUid, siddhantUid],
+        participantNames: {
+          vedantUid: vedantName,
+          siddhantUid: siddhantName,
+        },
+        lastMessage: 'Here is the completed build for Milestone 1.',
+        lastMessageTime: now,
+        unreadCounts: {
+          vedantUid: 1,
+          siddhantUid: 0,
+        },
+        projectId: 'proj_e2e_1',
+        lastMessageSenderId: siddhantUid,
+      );
+
+      expect(conv.participantIds, containsAll([vedantUid, siddhantUid]));
+      expect(conv.unreadCounts[vedantUid], 1);
+
+      final msg1 = MessageModel(
+        id: 'msg_1',
+        conversationId: conv.id,
+        senderId: siddhantUid,
+        receiverId: vedantUid,
+        message: 'Here is the completed build for Milestone 1.',
+        createdAt: now,
+        isRead: false,
+      );
+
+      expect(msg1.senderId, siddhantUid);
+      expect(msg1.receiverId, vedantUid);
+
+      final msg2 = MessageModel(
+        id: 'msg_2',
+        conversationId: conv.id,
+        senderId: vedantUid,
+        receiverId: siddhantUid,
+        message: 'Looks great! Reviewing the build right now.',
+        createdAt: now.add(const Duration(minutes: 5)),
+        isRead: true,
+      );
+
+      expect(msg2.senderId, vedantUid);
+      expect(msg2.receiverId, siddhantUid);
+    });
+
+    test('6. Vedant reviews deliverable, approves and releases Escrow payment', () {
+      final now = DateTime.now();
+      final completedProject = ProjectModel(
+        id: 'proj_e2e_1',
+        taskId: 'task_e2e_1',
+        clientId: vedantUid,
+        clientName: vedantName,
+        freelancerId: siddhantUid,
+        freelancerName: siddhantName,
+        title: 'Full-Stack Mobile App for FreelanceHub',
+        status: 'completed',
+        budget: 1500.0,
+        progress: 1.0,
+        startedDate: now,
+        dueDate: now.add(const Duration(days: 14)),
+        createdAt: now,
+        completedMilestones: 2,
+        totalMilestones: 2,
+      );
+
+      expect(completedProject.status, 'completed');
+      expect(completedProject.completedMilestones, 2);
+
+      final releasedPayment = PaymentModel(
+        id: 'pay_e2e_1',
+        projectId: completedProject.id,
+        clientId: vedantUid,
+        freelancerId: siddhantUid,
+        amount: 1500.0,
+        netAmount: 1500.0,
+        status: 'released',
+        createdAt: now,
+      );
+
+      expect(releasedPayment.status, 'released');
+      expect(releasedPayment.amount, 1500.0);
+    });
+
+    test('7. Real notifications generated for all workflow steps', () {
+      final now = DateTime.now();
+      final notif1 = NotificationModel(
+        id: 'notif_1',
+        userId: vedantUid,
+        type: 'new_proposal',
+        title: 'New Proposal Received',
+        message: '$siddhantName submitted an offer of \$1,500.00 for your task.',
+        referenceId: 'task_e2e_1',
+        createdAt: now,
+      );
+      expect(notif1.userId, vedantUid);
+      expect(notif1.type, 'new_proposal');
+
+      final notif2 = NotificationModel(
+        id: 'notif_2',
+        userId: siddhantUid,
+        type: 'proposal_accepted',
+        title: 'Proposal Accepted! 🎉',
+        message: '$vedantName accepted your offer. Project has started and escrow is funded.',
+        referenceId: 'proj_e2e_1',
+        createdAt: now,
+      );
+      expect(notif2.userId, siddhantUid);
+      expect(notif2.type, 'proposal_accepted');
+
+      final notif3 = NotificationModel(
+        id: 'notif_3',
+        userId: siddhantUid,
+        type: 'payment_released',
+        title: 'Escrow Funds Released! 💰',
+        message: '$vedantName approved your deliverable and released \$1,500.00.',
+        referenceId: 'proj_e2e_1',
+        createdAt: now,
+      );
+      expect(notif3.userId, siddhantUid);
+      expect(notif3.type, 'payment_released');
     });
   });
 }

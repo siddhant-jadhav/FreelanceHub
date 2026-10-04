@@ -14,6 +14,7 @@ import '../../repositories/review_repository.dart';
 import '../../repositories/task_repository.dart';
 import '../../repositories/user_repository.dart';
 import '../../services/auth_service.dart';
+import '../../services/client_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/storage_service.dart';
@@ -34,6 +35,7 @@ class FirebaseService {
 
   // Services
   AuthService get authService => AuthService.instance;
+  ClientService get clientService => ClientService.instance;
   FirestoreService get firestoreService => FirestoreService.instance;
   StorageService get storageService => StorageService.instance;
   NotificationService get notificationService => NotificationService.instance;
@@ -116,5 +118,10 @@ class FirebaseService {
   /// Sign Out
   Future<void> signOut() {
     return authService.signOut();
+  }
+
+  /// Provision the two application accounts
+  Future<void> ensureDefaultUsersProvisioned() {
+    return authService.ensureDefaultUsersProvisioned();
   }
 }

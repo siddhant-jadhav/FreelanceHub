@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 import '../models/order_model.dart';
@@ -1197,7 +1198,7 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
                         ],
                       ),
                       Text(
-                        'Protects image previews until Sarah approves delivery',
+                        'Protects image previews until ${_order.clientName.split(' ').first} approves delivery',
                         style: GoogleFonts.inter(fontSize: 10.5, color: AppColors.textSecondary),
                       ),
                     ],
@@ -1250,7 +1251,7 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
           const SizedBox(height: 6),
           Center(
             child: Text(
-              'Sarah will have 3 days to approve or ask for revisions',
+              '${_order.clientName.split(' ').first} will have 3 days to approve or ask for revisions',
               style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary),
             ),
           ),
@@ -1349,7 +1350,7 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
             ),
             icon: const Icon(LucideIcons.messageSquare, size: 15, color: AppColors.primary),
             label: Text(
-              'Contact Sarah',
+              'Contact ${_order.clientName.split(' ').first}',
               style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600),
             ),
           ),
@@ -1426,7 +1427,18 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
     }
 
     setState(() => _isDelivering = true);
-    await Future.delayed(const Duration(milliseconds: 800));
+
+    if (FirebaseConfig.instance.isInitialized) {
+      try {
+        final projectId = _order.id.replaceFirst('FH-', '');
+        await FirebaseService.instance.projectRepository
+            .updateProjectStatus(projectId, 'review');
+      } catch (e) {
+        debugPrint('Notice updating delivery status in Firestore: $e');
+      }
+    }
+
+    await Future.delayed(const Duration(milliseconds: 400));
 
     if (!mounted) return;
     setState(() {
@@ -1666,7 +1678,7 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
                     });
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Extension request for $selectedDays days sent to Sarah!'),
+                        content: Text('Extension request for $selectedDays days sent to ${_order.clientName.split(' ').first}!'),
                       ),
                     );
                   },

@@ -100,4 +100,16 @@ class ProposalRepository {
       throw AppException.from(e);
     }
   }
+
+  /// Toggle shortlist status of a proposal
+  Future<void> toggleProposalShortlist(String proposalId, bool isShortlisted) async {
+    try {
+      await _proposals.doc(proposalId).update({
+        'isShortlisted': isShortlisted,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw AppException.from(e);
+    }
+  }
 }

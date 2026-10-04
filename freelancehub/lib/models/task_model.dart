@@ -17,6 +17,7 @@ class TaskModel {
   final String status; // 'open', 'in_progress', 'completed', 'cancelled'
   final int offersCount;
   final List<String> attachments;
+  final String experienceLevel;
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -36,6 +37,7 @@ class TaskModel {
     this.status = 'open',
     this.offersCount = 0,
     this.attachments = const [],
+    this.experienceLevel = 'Mid (3-5 yrs)',
     required this.createdAt,
     this.updatedAt,
   });
@@ -66,6 +68,7 @@ class TaskModel {
       status: (map['status'] as String?) ?? 'open',
       offersCount: (map['offersCount'] as num?)?.toInt() ?? 0,
       attachments: List<String>.from(map['attachments'] ?? []),
+      experienceLevel: (map['experienceLevel'] as String?) ?? 'Mid (3-5 yrs)',
       createdAt: parseDate(map['createdAt']),
       updatedAt: map['updatedAt'] != null ? parseDate(map['updatedAt']) : null,
     );
@@ -91,6 +94,7 @@ class TaskModel {
       'status': status,
       'offersCount': offersCount,
       'attachments': attachments,
+      'experienceLevel': experienceLevel,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : FieldValue.serverTimestamp(),
     };
@@ -107,6 +111,7 @@ class TaskModel {
     String? status,
     int? offersCount,
     List<String>? attachments,
+    String? experienceLevel,
     DateTime? updatedAt,
   }) {
     return TaskModel(
@@ -125,6 +130,7 @@ class TaskModel {
       status: status ?? this.status,
       offersCount: offersCount ?? this.offersCount,
       attachments: attachments ?? this.attachments,
+      experienceLevel: experienceLevel ?? this.experienceLevel,
       createdAt: createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );

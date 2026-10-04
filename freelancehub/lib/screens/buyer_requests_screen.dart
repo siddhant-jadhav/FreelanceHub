@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
+import '../models/task_model.dart';
 
 /// Data model representing a Buyer Request / Opportunity
 class BuyerRequest {
@@ -70,6 +73,7 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
   final Set<String> _expandedDescriptions = <String>{};
 
   late List<BuyerRequest> _requests;
+  StreamSubscription<List<TaskModel>>? _tasksSub;
 
   @override
   void initState() {
@@ -93,79 +97,133 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
     });
   }
 
+  void _listenToFirebaseTasks() {
+    if (!FirebaseConfig.instance.isInitialized) return;
+    try {
+      _tasksSub = FirebaseService.instance.taskRepository
+          .streamOpenTasks()
+          .listen((tasks) {
+        if (!mounted) return;
+        setState(() {
+          _requests = tasks.map((t) {
+            final now = DateTime.now();
+            final diff = now.difference(t.createdAt);
+            String timeAgo;
+            if (diff.inMinutes < 60) {
+              timeAgo = 'Posted ${diff.inMinutes}m ago';
+            } else if (diff.inHours < 24) {
+              timeAgo = 'Posted ${diff.inHours}h ago';
+            } else {
+              timeAgo = 'Posted ${diff.inDays}d ago';
+            }
+            return BuyerRequest(
+              id: t.id,
+              clientName: t.clientName.isNotEmpty ? t.clientName : 'Client',
+              clientCountry: t.clientCountry ?? 'United States',
+              clientRating: 5.0,
+              clientOrdersCount: 1,
+              title: t.title,
+              description: t.description,
+              category: t.category,
+              skills: t.requiredSkills,
+              budget: t.budget,
+              deliveryDays: t.deadline
+                  .difference(t.createdAt)
+                  .inDays
+                  .clamp(1, 90),
+              offersSent: t.offersCount,
+              timeAgo: timeAgo,
+            );
+          }).toList();
+        });
+      }, onError: (e) {
+        debugPrint('Error streaming buyer requests: $e');
+      });
+    } catch (e) {
+      debugPrint('Notice listening to tasks: $e');
+    }
+  }
+
   void _initializeRequests() {
-    _requests = [
-      BuyerRequest(
-        id: 'br_1',
-        clientName: 'Sarah Jenkins',
-        clientCountry: 'United States',
-        clientRating: 5.0,
-        clientOrdersCount: 14,
-        title: 'Need complete Flutter mobile app UI design for FinTech wallet with 8 screens',
-        description:
-            'Looking for an expert designer to create modern, clean Figma/code mockups for our crypto wallet application. Experience with financial charts, payment flows, and responsive layouts required.',
-        category: 'Mobile Design',
-        skills: ['Figma', 'Flutter', 'FinTech Wallet', 'Mobile UI'],
-        budget: 650.00,
-        deliveryDays: 5,
-        offersSent: 6,
-        timeAgo: 'Posted 2 hours ago',
-      ),
-      BuyerRequest(
-        id: 'br_2',
-        clientName: 'Marcus Vance',
-        clientCountry: 'United Kingdom',
-        clientBadge: 'ENTERPRISE',
-        clientRating: 4.9,
-        clientOrdersCount: 31,
-        title: 'Landing page redesign & Tailwind CSS conversion for SaaS startup',
-        description:
-            'Seeking a refined front-end specialist to revamp our current landing page into clean Tailwind and React components with smooth micro-interactions, responsive grid, and fast loading performance.',
-        category: 'Web Dev',
-        skills: ['Tailwind CSS', 'React', 'Landing Page', 'UI Redesign'],
-        budget: 400.00,
-        deliveryDays: 3,
-        offersSent: 4,
-        timeAgo: 'Posted 4 hours ago',
-      ),
-      BuyerRequest(
-        id: 'br_3',
-        clientName: 'Elena Rostova',
-        clientCountry: 'Germany',
-        clientBadge: 'E-COMMERCE BRAND',
-        clientRating: 5.0,
-        clientOrdersCount: 8,
-        title: 'Shopify mobile UI enhancements & checkout optimization',
-        description:
-            'Need an experienced designer to restructure our mobile product pages and checkout flow to boost conversion rate. High fidelity Figma files and user journey wireframes ready for handover.',
-        category: 'Mobile Design',
-        skills: ['Shopify Plus', 'Mobile UI', 'Checkout Flow', 'E-Commerce'],
-        budget: 850.00,
-        deliveryDays: 7,
-        offersSent: 9,
-        timeAgo: 'Posted 5 hours ago',
-      ),
-      BuyerRequest(
-        id: 'br_4',
-        clientName: 'David Sterling',
-        clientCountry: 'Canada',
-        clientRating: 4.8,
-        clientOrdersCount: 19,
-        title: 'Complete Brand Identity & Design System for AI Automation Agency',
-        description:
-            'Looking for a creative branding specialist to build our complete visual identity including modern logo wordmark, curated color palette, typography guidelines, and social media presentation kit.',
-        category: 'Branding',
-        skills: ['Brand Identity', 'Logo Design', 'Design System', 'Typography'],
-        budget: 550.00,
-        deliveryDays: 6,
-        offersSent: 3,
-        timeAgo: 'Posted 6 hours ago',
-      ),
-    ];
+    if (FirebaseConfig.instance.isInitialized) {
+      _requests = [];
+      _listenToFirebaseTasks();
+    } else {
+      // In standalone tests where Firebase is not initialized, provide initial items for widget testing
+      _requests = [
+        BuyerRequest(
+          id: 'br_1',
+          clientName: 'Vedant',
+          clientCountry: 'India',
+          clientRating: 5.0,
+          clientOrdersCount: 14,
+          title: 'Need complete Flutter mobile app UI design for FinTech wallet with 8 screens',
+          description:
+              'Looking for an expert designer to create modern, clean Figma/code mockups for our crypto wallet application. Experience with financial charts, payment flows, and responsive layouts required.',
+          category: 'Mobile Design',
+          skills: ['Figma', 'Flutter', 'FinTech Wallet', 'Mobile UI'],
+          budget: 650.00,
+          deliveryDays: 5,
+          offersSent: 6,
+          timeAgo: 'Posted 2 hours ago',
+        ),
+        BuyerRequest(
+          id: 'br_2',
+          clientName: 'Vedant',
+          clientCountry: 'India',
+          clientBadge: 'ENTERPRISE',
+          clientRating: 4.9,
+          clientOrdersCount: 31,
+          title: 'Landing page redesign & Tailwind CSS conversion for SaaS startup',
+          description:
+              'Seeking a refined front-end specialist to revamp our current landing page into clean Tailwind and React components with smooth micro-interactions, responsive grid, and fast loading performance.',
+          category: 'Web Dev',
+          skills: ['Tailwind CSS', 'React', 'Landing Page', 'UI Redesign'],
+          budget: 400.00,
+          deliveryDays: 3,
+          offersSent: 4,
+          timeAgo: 'Posted 4 hours ago',
+        ),
+        BuyerRequest(
+          id: 'br_3',
+          clientName: 'Vedant',
+          clientCountry: 'India',
+          clientBadge: 'E-COMMERCE BRAND',
+          clientRating: 5.0,
+          clientOrdersCount: 8,
+          title: 'Shopify mobile UI enhancements & checkout optimization',
+          description:
+              'Need an experienced designer to restructure our mobile product pages and checkout flow to boost conversion rate. High fidelity Figma files and user journey wireframes ready for handover.',
+          category: 'Mobile Design',
+          skills: ['Shopify Plus', 'Mobile UI', 'Checkout Flow', 'E-Commerce'],
+          budget: 850.00,
+          deliveryDays: 7,
+          offersSent: 9,
+          timeAgo: 'Posted 5 hours ago',
+        ),
+        BuyerRequest(
+          id: 'br_4',
+          clientName: 'Vedant',
+          clientCountry: 'India',
+          clientRating: 4.8,
+          clientOrdersCount: 19,
+          title: 'Complete Brand Identity & Design System for AI Automation Agency',
+          description:
+              'Looking for a creative branding specialist to build our complete visual identity including modern logo wordmark, curated color palette, typography guidelines, and social media presentation kit.',
+          category: 'Branding',
+          skills: ['Brand Identity', 'Logo Design', 'Design System', 'Typography'],
+          budget: 550.00,
+          deliveryDays: 6,
+          offersSent: 3,
+          timeAgo: 'Posted 6 hours ago',
+        ),
+      ];
+    }
   }
 
   @override
   void dispose() {
+    _tasksSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }

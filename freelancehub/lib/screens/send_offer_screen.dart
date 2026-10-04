@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
+import '../models/proposal_model.dart';
+import '../services/notification_service.dart';
 import 'buyer_requests_screen.dart';
 
 /// Send Custom Offer & Proposal Screen for Freelancers.
@@ -140,6 +143,14 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
         _request = args;
         _priceController.text = _request.budget.toStringAsFixed(2);
         _deliveryDays = _request.deliveryDays;
+        final name = _request.clientName.trim().isNotEmpty ? _request.clientName.trim().split(' ').first : 'Client';
+        _pitchController.text =
+            'Hi $name, I would love to build this for your project!\n\n'
+            'Here is what I will deliver:\n'
+            '• High-quality Flutter application code following clean architecture\n'
+            '• Fully tested and production-ready implementation\n'
+            '• Complete documentation and setup guide\n\n'
+            'Ready to kick off right away and deliver high performance results.';
       } else if (widget.initialRequest != null) {
         _request = widget.initialRequest!;
         _priceController.text = _request.budget.toStringAsFixed(2);
@@ -147,7 +158,7 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
       } else {
         _request = BuyerRequest(
           id: 'br_default',
-          clientName: 'Sarah Jenkins',
+          clientName: FirebaseConfig.instance.isInitialized ? 'Vedant' : 'Sarah Jenkins',
           clientCountry: 'United States',
           clientBadge: 'VERIFIED BUYER',
           clientRating: 5.0,
@@ -1905,7 +1916,49 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
     }
 
     setState(() => _isSubmitting = true);
-    await Future.delayed(const Duration(milliseconds: 700));
+
+    try {
+      if (FirebaseConfig.instance.isInitialized) {
+        final currentUid = FirebaseService.instance.currentUser?.uid ?? 'siddhant';
+        final userProfile = await FirebaseService.instance.getUserProfile(currentUid);
+        final freelancerName = userProfile?['fullName'] ??
+            FirebaseService.instance.currentUser?.displayName ??
+            'Siddhant';
+
+        // Fetch task to get clientId if available
+        final task = await FirebaseService.instance.taskRepository.getTask(_request.id);
+        final clientId = task?.clientId ?? '';
+
+        final proposal = ProposalModel(
+          id: '',
+          taskId: _request.id,
+          taskTitle: _request.title,
+          clientId: clientId,
+          freelancerId: currentUid,
+          freelancerName: freelancerName,
+          proposedPrice: _totalOfferAmount,
+          deliveryTimeDays: _deliveryDays,
+          coverLetter: _pitchController.text.trim(),
+          milestones: _paymentType == 'milestone' ? _milestones : [],
+          status: 'pending',
+          createdAt: DateTime.now(),
+        );
+
+        await FirebaseService.instance.proposalRepository.submitProposal(proposal);
+        await FirebaseService.instance.taskRepository.incrementOffersCount(_request.id);
+
+        if (clientId.isNotEmpty) {
+          await NotificationService.instance.notifyNewProposal(
+            clientUserId: clientId,
+            freelancerName: freelancerName,
+            taskTitle: _request.title,
+            taskId: _request.id,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Proposal submission notice: $e');
+    }
 
     if (!mounted) return;
     setState(() => _isSubmitting = false);
