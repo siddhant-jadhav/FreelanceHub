@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart' show ServerValue;
+import 'package:flutter/foundation.dart';
 import '../core/errors/app_exception.dart';
 import '../core/firebase/firebase_config.dart';
 import '../models/task_model.dart';
@@ -22,6 +24,14 @@ class TaskRepository {
   Future<String> createTask(TaskModel task) async {
     try {
       final docRef = await _tasks.add(task.toMap());
+      // Mirror to Realtime DB for multi-engine synchronization
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('tasks/${docRef.id}').set({
+          ...task.toMap(),
+          'id': docRef.id,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
       return docRef.id;
     } catch (e) {
       throw AppException.from(e);
@@ -52,16 +62,16 @@ class TaskRepository {
     String? category,
     int limit = 25,
   }) {
-    Query<Map<String, dynamic>> query = _tasks
-        .where('status', isEqualTo: 'open')
-        .orderBy('createdAt', descending: true);
+    Query<Map<String, dynamic>> query = _tasks.where('status', isEqualTo: 'open');
 
     if (category != null && category.isNotEmpty && category != 'All') {
       query = query.where('category', isEqualTo: category);
     }
 
     return query.limit(limit).snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => TaskModel.fromFirestore(doc)).toList();
+      final tasks = snapshot.docs.map((doc) => TaskModel.fromFirestore(doc)).toList();
+      tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return tasks;
     });
   }
 
@@ -70,10 +80,11 @@ class TaskRepository {
     try {
       final snapshot = await _tasks
           .where('clientId', isEqualTo: clientId)
-          .orderBy('createdAt', descending: true)
           .get();
 
-      return snapshot.docs.map((doc) => TaskModel.fromFirestore(doc)).toList();
+      final list = snapshot.docs.map((doc) => TaskModel.fromFirestore(doc)).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     } catch (e) {
       throw AppException.from(e);
     }
@@ -83,10 +94,11 @@ class TaskRepository {
   Stream<List<TaskModel>> streamClientTasks(String clientId) {
     return _tasks
         .where('clientId', isEqualTo: clientId)
-        .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) => TaskModel.fromFirestore(doc)).toList();
+      final list = snapshot.docs.map((doc) => TaskModel.fromFirestore(doc)).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
   }
 
@@ -102,15 +114,21 @@ class TaskRepository {
     }
   }
 
-  /// Increment offers count on task
+  /// Increment offers count on task safely without crashing on mock IDs
   Future<void> incrementOffersCount(String taskId) async {
     try {
-      await _tasks.doc(taskId).update({
-        'offersCount': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final doc = await _tasks.doc(taskId).get();
+      if (doc.exists) {
+        await _tasks.doc(taskId).update({
+          'offersCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('tasks/$taskId/offersCount').set(ServerValue.increment(1));
+      } catch (_) {}
     } catch (e) {
-      throw AppException.from(e);
+      debugPrint('incrementOffersCount notice: $e');
     }
   }
 }

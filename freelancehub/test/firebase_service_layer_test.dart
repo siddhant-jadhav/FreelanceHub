@@ -672,5 +672,51 @@ void main() {
       expect(notif3.userId, siddhantUid);
       expect(notif3.type, 'payment_released');
     });
+
+    test('8. Milestone Deliverable, Revision Request, and Approval lifecycle', () {
+      final now = DateTime.now();
+      var milestone = MilestoneModel(
+        id: 'm-1',
+        projectId: 'proj_e2e_1',
+        milestoneNumber: 1,
+        title: 'Core Flutter Architecture & Screens',
+        amount: 750.0,
+        dueDate: now.add(const Duration(days: 7)),
+        status: 'funded_in_escrow',
+        description: 'Complete project structure, state management, and baseline navigation.',
+      );
+
+      // Step 8a: Freelancer submits deliverable
+      milestone = milestone.copyWith(
+        status: 'submitted',
+        deliverableNote: 'Completed architecture with clean BLoC and mock repositories.',
+        deliverableFileName: 'deliverable_v1.zip',
+        deliverableFileUrl: 'https://storage.freelancehub.io/deliverables/v1.zip',
+      );
+      expect(milestone.status, 'submitted');
+      expect(milestone.deliverableNote, contains('clean BLoC'));
+
+      // Step 8b: Client requests revision
+      milestone = milestone.copyWith(
+        status: 'in_revision',
+        revisionNote: 'Please optimize theme switching performance and dark mode contrast.',
+      );
+      expect(milestone.status, 'in_revision');
+      expect(milestone.revisionNote, contains('dark mode contrast'));
+
+      // Step 8c: Freelancer resubmits revision
+      milestone = milestone.copyWith(
+        status: 'submitted',
+        deliverableNote: 'Updated dark mode contrast ratios and cached theme provider.',
+        deliverableFileName: 'deliverable_v2.zip',
+      );
+      expect(milestone.status, 'submitted');
+
+      // Step 8d: Client approves deliverable
+      milestone = milestone.copyWith(
+        status: 'approved',
+      );
+      expect(milestone.status, 'approved');
+    });
   });
 }

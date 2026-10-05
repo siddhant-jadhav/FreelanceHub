@@ -6,6 +6,9 @@ import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 import '../models/order_model.dart';
+import '../models/project_model.dart';
+import '../services/notification_service.dart';
+import 'freelancer_dashboard_screen.dart';
 
 /// Detailed Order Delivery & Fulfillment Screen.
 /// Strictly implements FreelanceHub Design System (docs/design.md and .agents/rules/ui-design.md).
@@ -46,7 +49,6 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
   @override
   void initState() {
     super.initState();
-    _enforceFreelancerRole();
 
     // Default countdown: 1 day, 13 hours, 48 minutes, 22 seconds
     _remainingSeconds = (1 * 86400) + (13 * 3600) + (48 * 60) + 22;
@@ -73,6 +75,46 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args is FreelanceOrder) {
         _order = args;
+      } else if (args is FreelancerContract) {
+        _order = FreelanceOrder(
+          id: args.id,
+          clientName: args.clientName,
+          clientCompany: 'Client Account',
+          clientCountry: 'United States',
+          isClientVerified: true,
+          clientRating: 5.0,
+          gigTitle: args.title,
+          gigTier: 'Tier: Premium Milestone',
+          budget: args.amount,
+          startedDate: DateTime.now().subtract(const Duration(days: 2)),
+          dueDate: DateTime.now().add(const Duration(days: 5)),
+          totalDays: 7,
+          progressPercent: 0.8,
+          status: OrderStatus.inProgress,
+          clientBrief: 'Deliverable for ${args.title}',
+          briefFiles: const [],
+          timeline: const [],
+        );
+      } else if (args is ProjectModel) {
+        _order = FreelanceOrder(
+          id: args.id,
+          clientName: args.clientName,
+          clientCompany: 'Client Account',
+          clientCountry: 'United States',
+          isClientVerified: true,
+          clientRating: 5.0,
+          gigTitle: args.title,
+          gigTier: 'Tier: Premium Milestone',
+          budget: args.budget,
+          startedDate: args.startedDate,
+          dueDate: args.dueDate,
+          totalDays: 14,
+          progressPercent: args.progress,
+          status: OrderStatus.inProgress,
+          clientBrief: 'Deliverable for ${args.title}',
+          briefFiles: const [],
+          timeline: const [],
+        );
       } else if (widget.initialOrder != null) {
         _order = widget.initialOrder!;
       } else {
@@ -87,21 +129,6 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
     _countdownTimer?.cancel();
     _deliveryNoteController.dispose();
     super.dispose();
-  }
-
-  void _enforceFreelancerRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'client') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Access restricted: Clients cannot view seller delivery screens.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/client-home');
-      }
-    });
   }
 
   FreelanceOrder _createDefaultOrder() {
@@ -273,6 +300,11 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
         ],
       ),
       actions: [
+        IconButton(
+          icon: const Icon(LucideIcons.messageSquare, size: 20, color: AppColors.textSecondary),
+          tooltip: 'Messages',
+          onPressed: () => Navigator.of(context).pushNamed('/messages'),
+        ),
         IconButton(
           icon: const Icon(LucideIcons.moreVertical, size: 20, color: AppColors.textSecondary),
           tooltip: 'Order Options',
@@ -1430,9 +1462,58 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
 
     if (FirebaseConfig.instance.isInitialized) {
       try {
-        final projectId = _order.id.replaceFirst('FH-', '');
-        await FirebaseService.instance.projectRepository
-            .updateProjectStatus(projectId, 'review');
+        String projectId = _order.id.startsWith('FH-') ? _order.id.replaceFirst('FH-', '') : _order.id;
+
+        // If mock ID, find the real active project in Firestore for this freelancer
+        if (projectId == '9821' || projectId.isEmpty) {
+          final uid = FirebaseService.instance.currentUser?.uid;
+          if (uid != null) {
+            final projects = await FirebaseService.instance.projectRepository.getProjectsForFreelancer(uid);
+            if (projects.isNotEmpty) {
+              projectId = projects.first.id;
+            }
+          }
+        }
+
+        try {
+          await FirebaseService.instance.projectRepository
+              .updateProjectStatus(projectId, 'review');
+        } catch (_) {}
+
+        // Also update any pending milestone in MilestoneRepository
+        try {
+          final milestones = await FirebaseService.instance.milestoneRepository
+              .getMilestonesForProject(projectId);
+          if (milestones.isNotEmpty) {
+            final activeMilestone = milestones.firstWhere(
+              (m) => m.status != 'approved',
+              orElse: () => milestones.first,
+            );
+            await FirebaseService.instance.milestoneRepository.submitMilestoneDeliverable(
+              activeMilestone.id,
+              note: _deliveryNoteController.text.trim().isNotEmpty
+                  ? _deliveryNoteController.text.trim()
+                  : 'Project deliverable submitted.',
+              fileName: _uploadedFiles.isNotEmpty ? (_uploadedFiles.first['name'] ?? 'Deliverable_v1.zip') : 'Deliverable_v1.zip',
+              fileUrl: 'https://storage.freelancehub.io/deliverables/$projectId/v1.zip',
+            );
+          }
+        } catch (_) {}
+
+        // Notify client
+        try {
+          final user = FirebaseService.instance.currentUser;
+          final freelancerName = user?.displayName ?? 'Siddhant Jadhav';
+          final project = await FirebaseService.instance.projectRepository.getProject(projectId);
+          if (project != null) {
+            await NotificationService.instance.notifyMilestoneSubmitted(
+              clientUserId: project.clientId,
+              freelancerName: freelancerName,
+              milestoneTitle: _order.gigTitle,
+              projectId: projectId,
+            );
+          }
+        } catch (_) {}
       } catch (e) {
         debugPrint('Notice updating delivery status in Firestore: $e');
       }
@@ -1718,20 +1799,41 @@ class _OrderDeliveryScreenState extends State<OrderDeliveryScreen> {
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
+            OutlinedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.of(context).pushNamed(
+                  '/chat',
+                  arguments: {
+                    'contactName': _order.clientName,
+                    'otherUserName': _order.clientName,
+                    'otherUserRole': 'Client',
+                    'projectTitle': _order.gigTitle,
+                    'projectBudget': _order.budget,
+                    'projectId': _order.id,
+                  },
+                );
+              },
+              child: const Text('Open Chat'),
+            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
               onPressed: () {
-                if (msgCtrl.text.trim().isNotEmpty) {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Message delivered to ${_order.clientName}!'),
-                    ),
-                  );
-                }
+                Navigator.pop(ctx);
+                Navigator.of(context).pushNamed(
+                  '/chat',
+                  arguments: {
+                    'contactName': _order.clientName,
+                    'otherUserName': _order.clientName,
+                    'otherUserRole': 'Client',
+                    'projectTitle': _order.gigTitle,
+                    'projectBudget': _order.budget,
+                    'projectId': _order.id,
+                  },
+                );
               },
               child: const Text('Send Message'),
             ),

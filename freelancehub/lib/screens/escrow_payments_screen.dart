@@ -6,6 +6,7 @@ import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 import '../models/payment_model.dart';
+import '../models/project_model.dart';
 import '../services/client_service.dart';
 
 /// Screen 05 — Escrow & Payments
@@ -38,6 +39,13 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
   bool _elenaPaymentReleased = false;
   bool _isProcessingElena = false;
 
+  // Dynamic project & milestone context
+  List<PaymentModel> _realPayments = [];
+  ProjectModel? _activeProject;
+  String _activeFreelancerName = 'Elena Rostova';
+  double _activeMilestoneAmount = 400.0;
+  String _activeMilestoneTitle = 'Mobile App MVP — Milestone 2';
+
   // Milestone 2 (David) state
   bool _davidMilestoneFunded = false;
   bool _isProcessingDavid = false;
@@ -63,12 +71,61 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
     super.initState();
     _inEscrow = widget.initialEscrowAmount ?? 800.00;
     _initTransactions();
+    _loadActiveProject();
   }
 
   @override
   void dispose() {
     _paymentsSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadActiveProject() async {
+    if (!FirebaseConfig.instance.isInitialized) return;
+    try {
+      final uid = FirebaseService.instance.currentUser?.uid;
+      if (uid == null) return;
+      final isClient = FirebaseService.instance.currentRole == 'client';
+
+      List<ProjectModel> projects = [];
+      if (widget.projectId != null && widget.projectId!.isNotEmpty) {
+        final cleanId = widget.projectId!.replaceFirst('FH-', '');
+        final p = await FirebaseService.instance.projectRepository.getProject(cleanId) ??
+            await FirebaseService.instance.projectRepository.getProject(widget.projectId!);
+        if (p != null) projects = [p];
+      }
+      if (projects.isEmpty) {
+        projects = isClient
+            ? await FirebaseService.instance.projectRepository.getProjectsForClient(uid)
+            : await FirebaseService.instance.projectRepository.getProjectsForFreelancer(uid);
+      }
+
+      if (projects.isNotEmpty && mounted) {
+        final p = projects.first;
+        setState(() {
+          _activeProject = p;
+          if (p.freelancerName.isNotEmpty) {
+            _activeFreelancerName = p.freelancerName;
+          } else {
+            _activeFreelancerName = isClient ? 'Siddhant Jadhav' : 'Vedant (Client)';
+          }
+          if (p.budget > 0) {
+            _activeMilestoneAmount = p.budget;
+          }
+          _activeMilestoneTitle = p.title;
+
+          if (p.status == 'completed') {
+            _elenaPaymentReleased = true;
+            if (_released == 0) {
+              _released = p.budget;
+              _totalFunded = _inEscrow + _released;
+            }
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Notice loading active project in escrow: $e');
+    }
   }
 
   void _listenToPayments() {
@@ -89,6 +146,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
     try {
       _paymentsSub = stream.listen((payments) {
         if (!mounted) return;
+        _realPayments = payments;
         double inEscrow = 0.0;
         double released = 0.0;
         for (final p in payments) {
@@ -102,20 +160,25 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
           _inEscrow = inEscrow;
           _released = released;
           _totalFunded = inEscrow + released;
-          _transactions = payments.map((p) {
-            final isReleased = p.status == 'released';
-            return {
-              'id': p.id,
-              'title': isReleased ? 'Escrow Payment Released' : 'Escrow Deposit Funded',
-              'subtitle': 'Project #${p.projectId.length > 5 ? p.projectId.substring(0, 5).toUpperCase() : p.projectId.toUpperCase()}',
-              'amount': isReleased ? p.netAmount : p.amount,
-              'status': isReleased ? 'Completed' : 'Held in Escrow',
-              'isPositive': !isClient,
-              'icon': isReleased ? LucideIcons.arrowUpRight : LucideIcons.lock,
-              'iconColor': isReleased ? AppColors.primary : AppColors.textDark,
-              'iconBg': isReleased ? AppColors.primaryLight : AppColors.surfaceContainer,
-            };
-          }).toList();
+          if (released > 0) {
+            _elenaPaymentReleased = true;
+          }
+          if (payments.isNotEmpty) {
+            _transactions = payments.map((p) {
+              final isReleased = p.status == 'released';
+              return {
+                'id': p.id,
+                'title': isReleased ? 'Escrow Payment Released' : 'Escrow Deposit Funded',
+                'subtitle': 'Project #${p.projectId.length > 5 ? p.projectId.substring(0, 5).toUpperCase() : p.projectId.toUpperCase()}',
+                'amount': isReleased ? p.netAmount : p.amount,
+                'status': isReleased ? 'Completed' : 'Held in Escrow',
+                'isPositive': !isClient,
+                'icon': isReleased ? LucideIcons.arrowUpRight : LucideIcons.lock,
+                'iconColor': isReleased ? AppColors.primary : AppColors.textDark,
+                'iconBg': isReleased ? AppColors.primaryLight : AppColors.surfaceContainer,
+              };
+            }).toList();
+          }
         });
       }, onError: (e) {
         debugPrint('Error streaming payments: $e');
@@ -205,7 +268,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Release \$400.00 from Escrow to Elena Rostova for Mobile App MVP — Milestone 2?',
+                'Release \$${_activeMilestoneAmount.toStringAsFixed(2)} from Escrow to $_activeFreelancerName for $_activeMilestoneTitle?',
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   height: 1.5,
@@ -226,7 +289,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '100% Escrow Guarantee. This will mark Milestone 2 as completed and transfer \$400 to the freelancer.',
+                        '100% Escrow Guarantee. This will mark the milestone as completed and transfer \$${_activeMilestoneAmount.toStringAsFixed(2)} to the freelancer.',
                         style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary),
                       ),
                     ),
@@ -257,7 +320,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               child: Text(
-                'Confirm & Release (\$400)',
+                'Confirm & Release (\$${_activeMilestoneAmount.toStringAsFixed(0)})',
                 style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 14),
               ),
             ),
@@ -271,9 +334,47 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
     setState(() => _isProcessingElena = true);
 
     // Live Firebase call if configured
-    if (FirebaseConfig.instance.isInitialized && widget.projectId != null) {
+    if (FirebaseConfig.instance.isInitialized) {
       try {
-        await ClientService.instance.releaseMilestoneEscrow('pay_elena_m2');
+        PaymentModel? escrowPayment;
+        try {
+          escrowPayment = _realPayments.firstWhere(
+            (p) => p.status == 'held_in_escrow',
+          );
+        } catch (_) {}
+
+        if (escrowPayment == null && widget.projectId != null) {
+          final payments = await FirebaseService.instance.paymentRepository
+              .getPaymentsForProject(widget.projectId!);
+          try {
+            escrowPayment = payments.firstWhere(
+              (p) => p.status == 'held_in_escrow',
+            );
+          } catch (_) {}
+        }
+
+        if (escrowPayment != null) {
+          await ClientService.instance.releaseMilestoneEscrow(escrowPayment.id);
+          if (escrowPayment.projectId.isNotEmpty) {
+            final cleanId = escrowPayment.projectId.replaceFirst('FH-', '');
+            await FirebaseService.instance.projectRepository
+                .updateProjectStatus(cleanId, 'completed').catchError((_) {});
+            await FirebaseService.instance.projectRepository
+                .updateProjectStatus(escrowPayment.projectId, 'completed').catchError((_) {});
+          }
+        } else {
+          final prj = _activeProject;
+          final pId = prj?.id ?? widget.projectId ?? 'active_project';
+          final fId = prj?.freelancerId ?? 'dGHpEXlNcJVaQkV9pQfXuSvAl0y2';
+          await ClientService.instance.reviewMilestoneDeliverable(
+            projectId: pId,
+            milestoneId: 'm-final',
+            freelancerId: fId,
+            milestoneTitle: _activeMilestoneTitle,
+            amount: _activeMilestoneAmount,
+            approved: true,
+          );
+        }
       } catch (e) {
         debugPrint('Release notice: $e');
       }
@@ -283,17 +384,19 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
 
     if (!mounted) return;
 
+    final amountReleased = _activeMilestoneAmount;
+
     setState(() {
       _isProcessingElena = false;
       _elenaPaymentReleased = true;
-      _inEscrow = (_inEscrow - 400.00).clamp(0.0, 999999.0);
-      _released += 400.00;
+      _inEscrow = (_inEscrow - amountReleased).clamp(0.0, 999999.0);
+      _released += amountReleased;
 
       _transactions.insert(0, {
         'id': 'tx-${DateTime.now().millisecondsSinceEpoch}',
-        'title': 'Milestone 2 Payment Released',
-        'subtitle': 'Elena Rostova • Just now',
-        'amount': -400.00,
+        'title': 'Milestone Payment Released',
+        'subtitle': '$_activeFreelancerName • Just now',
+        'amount': -amountReleased,
         'status': 'Completed',
         'isPositive': false,
         'icon': LucideIcons.arrowUpRight,
@@ -310,7 +413,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Payment of \$400.00 released successfully to Elena Rostova!',
+                'Payment of \$${amountReleased.toStringAsFixed(2)} released successfully to $_activeFreelancerName!',
                 style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600),
               ),
             ),
@@ -813,6 +916,112 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
           ),
         ),
       ),
+      bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+
+  Widget _buildBottomNavigationBar() {
+    final role = FirebaseService.instance.currentRole;
+    final isFreelancer = role == 'freelancer';
+
+    if (isFreelancer) {
+      return BottomNavigationBar(
+        currentIndex: 4, // Earnings tab
+        onTap: (index) {
+          if (index == 0) {
+            Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
+          } else if (index == 1) {
+            Navigator.of(context).pushReplacementNamed('/buyer-requests');
+          } else if (index == 2) {
+            Navigator.of(context).pushReplacementNamed('/orders');
+          } else if (index == 3) {
+            Navigator.of(context).pushNamed('/messages');
+          }
+        },
+        backgroundColor: Colors.white,
+        selectedItemColor: AppColors.primaryDark,
+        unselectedItemColor: AppColors.textSecondary,
+        selectedLabelStyle: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelStyle: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w500,
+        ),
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.layoutDashboard, size: 19),
+            label: 'Dashboard',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.inbox, size: 19),
+            label: 'Requests',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.clipboardList, size: 19),
+            label: 'Orders',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.messageSquare, size: 19),
+            label: 'Inbox',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.wallet, size: 19),
+            label: 'Earnings',
+          ),
+        ],
+      );
+    }
+
+    return BottomNavigationBar(
+      currentIndex: 4, // Escrow tab
+      onTap: (index) {
+        if (index == 0) {
+          Navigator.of(context).pushReplacementNamed('/client-home');
+        } else if (index == 1) {
+          Navigator.of(context).pushNamed('/post-task');
+        } else if (index == 2) {
+          Navigator.of(context).pushNamed('/project-workspace');
+        } else if (index == 3) {
+          Navigator.of(context).pushNamed('/messages');
+        }
+      },
+      backgroundColor: Colors.white,
+      selectedItemColor: AppColors.primaryDark,
+      unselectedItemColor: AppColors.textSecondary,
+      selectedLabelStyle: GoogleFonts.inter(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w700,
+      ),
+      unselectedLabelStyle: GoogleFonts.inter(
+        fontSize: 11,
+        fontWeight: FontWeight.w500,
+      ),
+      type: BottomNavigationBarType.fixed,
+      items: const [
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.house, size: 22),
+          label: 'Home',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.circlePlus, size: 22),
+          label: 'Post Task',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.briefcase, size: 22),
+          label: 'Projects',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.messageSquare, size: 22),
+          label: 'Messages',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(LucideIcons.shieldCheck, size: 22),
+          label: 'Escrow',
+        ),
+      ],
     );
   }
 
@@ -861,18 +1070,22 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
         ],
       ),
       actions: [
-        Container(
-          margin: const EdgeInsets.only(right: 16),
-          width: 32,
-          height: 32,
-          decoration: const BoxDecoration(
-            color: AppColors.primary,
-            shape: BoxShape.circle,
-          ),
-          child: const Center(
-            child: Icon(LucideIcons.user, size: 16, color: Colors.white),
-          ),
+        IconButton(
+          tooltip: 'Messages',
+          icon: const Icon(LucideIcons.messageSquare, size: 20, color: AppColors.textSecondary),
+          onPressed: () => Navigator.of(context).pushNamed('/messages'),
         ),
+        IconButton(
+          tooltip: 'Sign Out',
+          icon: const Icon(LucideIcons.logOut, size: 20, color: AppColors.textSecondary),
+          onPressed: () async {
+            await FirebaseService.instance.signOut();
+            if (mounted) {
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+            }
+          },
+        ),
+        const SizedBox(width: 8),
       ],
     );
   }
@@ -1247,6 +1460,8 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
   }
 
   Widget _buildElenaMilestoneCard() {
+    final initials = _activeFreelancerName.split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase();
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1279,7 +1494,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
                     ),
                     child: Center(
                       child: Text(
-                        'ER',
+                        initials.isNotEmpty ? initials : 'SJ',
                         style: GoogleFonts.inter(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -1297,7 +1512,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
                         style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary),
                       ),
                       Text(
-                        'Elena Rostova',
+                        _activeFreelancerName,
                         style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -1336,7 +1551,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Mobile App MVP — Milestone 2',
+                  _activeMilestoneTitle,
                   style: GoogleFonts.inter(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
@@ -1363,7 +1578,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
                       ],
                     ),
                     Text(
-                      '\$400.00',
+                      '\$${_activeMilestoneAmount.toStringAsFixed(2)}',
                       style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -1389,7 +1604,7 @@ class _EscrowPaymentsScreenState extends State<EscrowPaymentsScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Payment of \$400.00 released successfully to Elena Rostova!',
+                      'Payment of \$${_activeMilestoneAmount.toStringAsFixed(2)} released successfully to $_activeFreelancerName!',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,

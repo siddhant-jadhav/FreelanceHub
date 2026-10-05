@@ -64,6 +64,7 @@ class ChatPreviewCard {
 /// and instant messaging capabilities.
 class IndividualChatScreen extends StatefulWidget {
   final String? conversationId;
+  final String? recipientUid;
   final String contactName;
   final String contactRole;
   final String? contactPhotoUrl;
@@ -78,6 +79,7 @@ class IndividualChatScreen extends StatefulWidget {
   const IndividualChatScreen({
     super.key,
     this.conversationId,
+    this.recipientUid,
     this.contactName = 'Sarah Johnson',
     this.contactRole = 'Client',
     this.contactPhotoUrl,
@@ -136,40 +138,45 @@ class _IndividualChatScreenState extends State<IndividualChatScreen>
     final isClient = role == 'client';
 
     // 1. Resolve recipient UID if not provided
-    String? recipientUid;
+    String? recipientUid = widget.recipientUid;
     String recipientName = _displayContactName;
 
-    try {
-      final otherRole = isClient ? 'freelancer' : 'client';
-      final usersQuery = await FirebaseService.instance.firestore
-          .collection('users')
-          .where('role', isEqualTo: otherRole)
-          .limit(1)
-          .get();
+    if (recipientUid == null ||
+        recipientUid.isEmpty ||
+        recipientUid.startsWith('client-') ||
+        recipientUid.startsWith('freelancer-')) {
+      try {
+        final otherRole = isClient ? 'freelancer' : 'client';
+        final usersQuery = await FirebaseService.instance.firestore
+            .collection('users')
+            .where('role', isEqualTo: otherRole)
+            .limit(1)
+            .get();
 
-      if (usersQuery.docs.isNotEmpty) {
-        recipientUid = usersQuery.docs.first.id;
-        recipientName = (usersQuery.docs.first.data()['fullName'] as String?) ??
-            (isClient ? 'Siddhant Jadhav' : 'Vedant');
-        if (mounted) {
-          setState(() {
-            _displayContactName = recipientName;
-            _displayContactInitials = recipientName.trim().isNotEmpty
-                ? (recipientName.trim().split(' ').length > 1
-                    ? '${recipientName.trim().split(' ')[0][0]}${recipientName.trim().split(' ')[1][0]}'.toUpperCase()
-                    : recipientName.trim()[0].toUpperCase())
-                : 'U';
-          });
+        if (usersQuery.docs.isNotEmpty) {
+          recipientUid = usersQuery.docs.first.id;
+          recipientName = (usersQuery.docs.first.data()['fullName'] as String?) ??
+              (isClient ? 'Siddhant Jadhav' : 'Vedant');
+          if (mounted) {
+            setState(() {
+              _displayContactName = recipientName;
+              _displayContactInitials = recipientName.trim().isNotEmpty
+                  ? (recipientName.trim().split(' ').length > 1
+                      ? '${recipientName.trim().split(' ')[0][0]}${recipientName.trim().split(' ')[1][0]}'.toUpperCase()
+                      : recipientName.trim()[0].toUpperCase())
+                  : 'U';
+            });
+          }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
-    recipientUid ??= (isClient ? 'siddhant_user' : 'vedant_user');
+    recipientUid ??= (isClient ? 'dGHpEXlNcJVaQkV9pQfXuSvAl0y2' : 'BemoqPnrsqNxAW5g37463inSc3K3');
     _recipientUid = recipientUid;
 
     // 2. Resolve or create conversation
     String convId = widget.conversationId ?? '';
-    if (convId.isEmpty) {
+    if (convId.isEmpty || convId.startsWith('conv_')) {
       try {
         final currentProfile =
             await FirebaseService.instance.getUserProfile(currentUid);
@@ -771,7 +778,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen>
       elevation: 0.5,
       leading: IconButton(
         icon: const Icon(LucideIcons.chevronLeft, color: AppColors.textPrimary, size: 22),
-        onPressed: () => Navigator.of(context).pop(),
+        onPressed: () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          } else {
+            Navigator.of(context).pushReplacementNamed('/messages');
+          }
+        },
       ),
       titleSpacing: 0,
       title: Row(

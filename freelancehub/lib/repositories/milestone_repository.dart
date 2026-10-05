@@ -22,6 +22,13 @@ class MilestoneRepository {
   Future<String> createMilestone(MilestoneModel milestone) async {
     try {
       final docRef = await _milestones.add(milestone.toMap());
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('milestones/${docRef.id}').set({
+          ...milestone.toMap(),
+          'id': docRef.id,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
       return docRef.id;
     } catch (e) {
       throw AppException.from(e);
@@ -33,12 +40,13 @@ class MilestoneRepository {
     try {
       final snapshot = await _milestones
           .where('projectId', isEqualTo: projectId)
-          .orderBy('milestoneNumber')
           .get();
 
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => MilestoneModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => a.milestoneNumber.compareTo(b.milestoneNumber));
+      return list;
     } catch (e) {
       throw AppException.from(e);
     }
@@ -48,12 +56,13 @@ class MilestoneRepository {
   Stream<List<MilestoneModel>> streamMilestonesForProject(String projectId) {
     return _milestones
         .where('projectId', isEqualTo: projectId)
-        .orderBy('milestoneNumber')
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => MilestoneModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => a.milestoneNumber.compareTo(b.milestoneNumber));
+      return list;
     });
   }
 
@@ -72,6 +81,15 @@ class MilestoneRepository {
         'deliverableFileUrl': fileUrl,
         'submittedAt': FieldValue.serverTimestamp(),
       });
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('milestones/$milestoneId').update({
+          'status': 'submitted',
+          'deliverableNote': note,
+          'deliverableFileName': fileName,
+          'deliverableFileUrl': fileUrl,
+          'submittedAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
     } catch (e) {
       throw AppException.from(e);
     }
@@ -84,6 +102,12 @@ class MilestoneRepository {
         'status': 'approved',
         'approvedAt': FieldValue.serverTimestamp(),
       });
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('milestones/$milestoneId').update({
+          'status': 'approved',
+          'approvedAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
     } catch (e) {
       throw AppException.from(e);
     }
@@ -100,6 +124,13 @@ class MilestoneRepository {
         'revisionNote': revisionNote,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('milestones/$milestoneId').update({
+          'status': 'in_revision',
+          'revisionNote': revisionNote,
+          'updatedAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
     } catch (e) {
       throw AppException.from(e);
     }

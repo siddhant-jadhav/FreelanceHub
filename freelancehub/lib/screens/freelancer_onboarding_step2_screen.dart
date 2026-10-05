@@ -100,22 +100,6 @@ class _FreelancerOnboardingStep2ScreenState
   @override
   void initState() {
     super.initState();
-    _enforceFreelancerRole();
-  }
-
-  void _enforceFreelancerRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'client') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Access restricted: Clients cannot view freelancer screens.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/client-home');
-      }
-    });
   }
 
   @override

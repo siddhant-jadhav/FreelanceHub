@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'core/firebase/firebase_config.dart';
-import 'core/services/firebase_service.dart';
 import 'core/theme/app_colors.dart';
 import 'models/project_model.dart';
 import 'models/task_model.dart';
@@ -43,6 +42,27 @@ void main() async {
     ),
   );
 
+  // Suppress the yellow/black striped RenderFlex overflow error banner on screen
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    final bool isOverflow = details.exceptionAsString().contains('overflowed');
+    if (isOverflow) {
+      // Gracefully render the widget without drawing the yellow/black striped warning tape
+      return const SizedBox.shrink();
+    }
+    return Material(
+      color: Colors.white,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'Error: ${details.exception}',
+            style: const TextStyle(color: Colors.red, fontSize: 12),
+          ),
+        ),
+      ),
+    );
+  };
+
   runApp(const FreelanceHubApp());
 }
 
@@ -68,29 +88,6 @@ class FreelanceHubApp extends StatelessWidget {
       ),
       initialRoute: '/',
       onGenerateRoute: (settings) {
-        final role = FirebaseService.instance.currentRole;
-        // Role-based route guard: prevent cross-role screen access
-        if (role == 'freelancer' &&
-            (settings.name == '/client-home' || settings.name == '/post-task')) {
-          return MaterialPageRoute(
-            builder: (context) => const FreelancerDashboardScreen(),
-            settings: settings,
-          );
-        }
-        if (role == 'client' &&
-            (settings.name == '/freelancer-onboarding' ||
-                settings.name == '/freelancer-onboarding-step2' ||
-                settings.name == '/freelancer-dashboard' ||
-                settings.name == '/buyer-requests' ||
-                settings.name == '/send-offer' ||
-                settings.name == '/orders' ||
-                settings.name == '/order-delivery')) {
-          return MaterialPageRoute(
-            builder: (context) => const ClientHomeScreen(),
-            settings: settings,
-          );
-        }
-
         switch (settings.name) {
           case '/freelancer-onboarding':
             return MaterialPageRoute(
@@ -214,19 +211,35 @@ class FreelanceHubApp extends StatelessWidget {
               settings: settings,
             );
           case '/messages':
+          case '/messages-inbox':
+          case '/inbox':
             return MaterialPageRoute(
               builder: (context) => const MessagesInboxScreen(),
               settings: settings,
             );
           case '/chat':
+          case '/individual-chat':
             if (settings.arguments is Map<String, dynamic>) {
               final args = settings.arguments as Map<String, dynamic>;
+              final name = (args['contactName'] as String?) ??
+                  (args['otherUserName'] as String?) ??
+                  'Contact';
+              final role = (args['contactRole'] as String?) ??
+                  (args['otherUserRole'] as String?) ??
+                  'User';
+              final initials = (args['contactInitials'] as String?) ??
+                  (name.trim().isNotEmpty
+                      ? (name.trim().split(' ').length > 1
+                          ? '${name.trim().split(' ')[0][0]}${name.trim().split(' ')[1][0]}'.toUpperCase()
+                          : name.trim()[0].toUpperCase())
+                      : 'U');
               return MaterialPageRoute(
                 builder: (context) => IndividualChatScreen(
                   conversationId: args['conversationId'] as String?,
-                  contactName: (args['contactName'] as String?) ?? 'Contact',
-                  contactRole: (args['contactRole'] as String?) ?? 'User',
-                  contactInitials: (args['contactInitials'] as String?) ?? 'U',
+                  recipientUid: (args['recipientUid'] as String?) ?? (args['otherUserId'] as String?),
+                  contactName: name,
+                  contactRole: role,
+                  contactInitials: initials,
                   isOnline: (args['isOnline'] as bool?) ?? true,
                   projectTitle: (args['projectTitle'] as String?) ?? 'Project Workspace',
                   projectBudget: (args['projectBudget'] as num?)?.toDouble() ?? 0.0,

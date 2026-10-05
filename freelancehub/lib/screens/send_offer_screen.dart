@@ -5,6 +5,7 @@ import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 import '../models/proposal_model.dart';
+import '../models/task_model.dart';
 import '../services/notification_service.dart';
 import 'buyer_requests_screen.dart';
 
@@ -131,7 +132,6 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
     );
 
     _priceController = TextEditingController(text: '600.00');
-    _enforceFreelancerRole();
   }
 
   @override
@@ -141,6 +141,33 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args is BuyerRequest) {
         _request = args;
+        _priceController.text = _request.budget.toStringAsFixed(2);
+        _deliveryDays = _request.deliveryDays;
+        final name = _request.clientName.trim().isNotEmpty ? _request.clientName.trim().split(' ').first : 'Client';
+        _pitchController.text =
+            'Hi $name, I would love to build this for your project!\n\n'
+            'Here is what I will deliver:\n'
+            '• High-quality Flutter application code following clean architecture\n'
+            '• Fully tested and production-ready implementation\n'
+            '• Complete documentation and setup guide\n\n'
+            'Ready to kick off right away and deliver high performance results.';
+      } else if (args is TaskModel) {
+        _request = BuyerRequest(
+          id: args.id,
+          clientName: args.clientName.isNotEmpty ? args.clientName : 'Vedant',
+          clientCountry: 'United States',
+          clientBadge: 'VERIFIED BUYER',
+          clientRating: 5.0,
+          clientOrdersCount: 5,
+          title: args.title,
+          description: args.description,
+          category: args.category,
+          skills: args.requiredSkills,
+          budget: args.budget,
+          deliveryDays: args.deadline.difference(DateTime.now()).inDays.clamp(1, 30),
+          offersSent: args.offersCount,
+          timeAgo: 'Just now',
+        );
         _priceController.text = _request.budget.toStringAsFixed(2);
         _deliveryDays = _request.deliveryDays;
         final name = _request.clientName.trim().isNotEmpty ? _request.clientName.trim().split(' ').first : 'Client';
@@ -183,21 +210,6 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
     _pitchController.dispose();
     _priceController.dispose();
     super.dispose();
-  }
-
-  void _enforceFreelancerRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'client') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Access restricted: Clients cannot submit custom offers.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/client-home');
-      }
-    });
   }
 
   double get _totalOfferAmount {
@@ -320,6 +332,11 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
         ],
       ),
       actions: [
+        IconButton(
+          icon: const Icon(LucideIcons.messageSquare, size: 20, color: AppColors.textSecondary),
+          tooltip: 'Messages',
+          onPressed: () => Navigator.of(context).pushNamed('/messages'),
+        ),
         IconButton(
           icon: const Icon(LucideIcons.helpCircle, size: 20, color: AppColors.textSecondary),
           tooltip: 'Proposal Guidelines',
@@ -459,6 +476,40 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
                       ],
                     ),
                   ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pushNamed(
+                    '/chat',
+                    arguments: {
+                      'contactName': _request.clientName,
+                      'otherUserName': _request.clientName,
+                      'otherUserRole': 'Client',
+                      'projectTitle': _request.title,
+                      'projectBudget': _request.budget,
+                    },
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(LucideIcons.messageSquare, size: 13, color: AppColors.primaryDark),
+                label: Text(
+                  'Message Buyer',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primaryDark,
+                  ),
                 ),
               ),
             ],
@@ -1919,11 +1970,11 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
 
     try {
       if (FirebaseConfig.instance.isInitialized) {
-        final currentUid = FirebaseService.instance.currentUser?.uid ?? 'siddhant';
+        final currentUid = FirebaseService.instance.currentUser?.uid ?? 'dGHpEXlNcJVaQkV9pQfXuSvAl0y2';
         final userProfile = await FirebaseService.instance.getUserProfile(currentUid);
         final freelancerName = userProfile?['fullName'] ??
             FirebaseService.instance.currentUser?.displayName ??
-            'Siddhant';
+            'Siddhant Jadhav';
 
         // Fetch task to get clientId if available
         final task = await FirebaseService.instance.taskRepository.getTask(_request.id);
@@ -1945,7 +1996,6 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
         );
 
         await FirebaseService.instance.proposalRepository.submitProposal(proposal);
-        await FirebaseService.instance.taskRepository.incrementOffersCount(_request.id);
 
         if (clientId.isNotEmpty) {
           await NotificationService.instance.notifyNewProposal(
@@ -1956,21 +2006,28 @@ class _SendOfferScreenState extends State<SendOfferScreen> {
           );
         }
       }
+
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+
+      // Update passed request state
+      _request.hasSubmittedOffer = true;
+      _request.offersSent += 1;
+      _request.submittedAmount = _totalOfferAmount;
+      _request.submittedDays = _deliveryDays;
+      _request.submittedPitch = _pitchController.text.trim();
+
+      _showSuccessBottomSheet();
     } catch (e) {
-      debugPrint('Proposal submission notice: $e');
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to submit proposal: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
     }
-
-    if (!mounted) return;
-    setState(() => _isSubmitting = false);
-
-    // Update passed request state
-    _request.hasSubmittedOffer = true;
-    _request.offersSent += 1;
-    _request.submittedAmount = _totalOfferAmount;
-    _request.submittedDays = _deliveryDays;
-    _request.submittedPitch = _pitchController.text.trim();
-
-    _showSuccessBottomSheet();
   }
 
   void _showSuccessBottomSheet() {

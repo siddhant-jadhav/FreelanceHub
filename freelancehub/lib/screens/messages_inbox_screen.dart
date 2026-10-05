@@ -180,7 +180,7 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
               orElse: () => '',
             );
             final otherName = conv.participantNames[otherUid] ??
-                (currentRole == 'client' ? 'Siddhant' : 'Vedant');
+                (currentRole == 'client' ? 'Siddhant Jadhav' : 'Vedant');
             final otherRole = currentRole == 'client' ? 'Freelancer' : 'Client';
             final otherInitials =
                 otherName.isNotEmpty ? otherName[0].toUpperCase() : 'U';
@@ -236,7 +236,7 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
       if (currentRole == 'client') {
         _activeContacts = const [
           ChatContactData(
-            id: 'siddhant-freelancer',
+            id: 'dGHpEXlNcJVaQkV9pQfXuSvAl0y2',
             fullName: 'Siddhant Jadhav',
             displayName: 'Siddhant',
             initials: 'SJ',
@@ -250,7 +250,7 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
       } else {
         _activeContacts = const [
           ChatContactData(
-            id: 'vedant-client',
+            id: 'BemoqPnrsqNxAW5g37463inSc3K3',
             fullName: 'Vedant',
             displayName: 'Vedant',
             initials: 'V',
@@ -263,6 +263,7 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
         ];
       }
       _listenToConversations();
+      _loadRealContacts();
       return;
     }
     _conversations = [
@@ -397,11 +398,51 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
     return _conversations.fold<int>(0, (sum, item) => sum + item.unreadCount);
   }
 
+  Future<void> _loadRealContacts() async {
+    try {
+      final currentRole = FirebaseService.instance.currentRole;
+      final otherRole = currentRole == 'client' ? 'freelancer' : 'client';
+      final query = await FirebaseService.instance.firestore
+          .collection('users')
+          .where('role', isEqualTo: otherRole)
+          .get();
+
+      if (query.docs.isNotEmpty && mounted) {
+        setState(() {
+          _activeContacts = query.docs.map((doc) {
+            final data = doc.data();
+            final name = (data['fullName'] as String?) ??
+                (otherRole == 'freelancer' ? 'Siddhant Jadhav' : 'Vedant');
+            final initials = name.trim().isNotEmpty
+                ? (name.trim().split(' ').length > 1
+                    ? '${name.trim().split(' ')[0][0]}${name.trim().split(' ')[1][0]}'.toUpperCase()
+                    : name.trim()[0].toUpperCase())
+                : 'U';
+            return ChatContactData(
+              id: doc.id,
+              fullName: name,
+              displayName: name.split(' ').first,
+              initials: initials,
+              role: otherRole == 'freelancer' ? 'Freelancer' : 'Client',
+              isOnline: true,
+              projectTitle: 'Active Workspace',
+              projectBudget: 1500.0,
+              projectEscrow: 1500.0,
+            );
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading real contacts: $e');
+    }
+  }
+
   void _openChat(ChatContactData contact, {String? conversationId}) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => IndividualChatScreen(
           conversationId: conversationId,
+          recipientUid: contact.id,
           contactName: contact.fullName,
           contactRole: contact.role,
           contactInitials: contact.initials,
@@ -493,6 +534,12 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
       backgroundColor: Colors.white,
       elevation: 0.5,
       automaticallyImplyLeading: false,
+      leading: Navigator.canPop(context)
+          ? IconButton(
+              icon: const Icon(LucideIcons.arrowLeft, color: AppColors.textPrimary, size: 22),
+              onPressed: () => Navigator.of(context).pop(),
+            )
+          : null,
       title: Row(
         children: [
           RichText(
@@ -531,13 +578,75 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
           tooltip: 'Notifications',
         ),
         Padding(
-          padding: const EdgeInsets.only(right: 14, left: 2),
+          padding: const EdgeInsets.only(right: 4, left: 2),
           child: InkWell(
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Opening user profile...'),
-                  behavior: SnackBarBehavior.floating,
+              final user = FirebaseService.instance.currentUser;
+              final role = FirebaseService.instance.currentRole;
+              final name = user?.displayName ?? (role == 'client' ? 'Vedant' : 'Siddhant Jadhav');
+              final email = user?.email ?? (role == 'client' ? 'vedant@gmail.com' : 'siddhant@gmail.com');
+
+              showModalBottomSheet(
+                context: context,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                backgroundColor: Colors.white,
+                builder: (ctx) => SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: AppColors.border,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        CircleAvatar(
+                          radius: 28,
+                          backgroundColor: AppColors.primaryLight,
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : 'U',
+                            style: GoogleFonts.inter(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primaryDark,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          name,
+                          style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          email,
+                          style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                        const SizedBox(height: 20),
+                        const Divider(height: 1),
+                        const SizedBox(height: 8),
+                        ListTile(
+                          leading: const Icon(LucideIcons.logOut, color: AppColors.error, size: 20),
+                          title: Text('Sign Out', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.error)),
+                          contentPadding: EdgeInsets.zero,
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            await FirebaseService.instance.signOut();
+                            if (mounted) {
+                              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
@@ -555,6 +664,21 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
             ),
           ),
         ),
+        IconButton(
+          tooltip: 'Sign Out',
+          icon: const Icon(
+            LucideIcons.logOut,
+            size: 20,
+            color: AppColors.textSecondary,
+          ),
+          onPressed: () async {
+            await FirebaseService.instance.signOut();
+            if (mounted) {
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+            }
+          },
+        ),
+        const SizedBox(width: 8),
       ],
     );
   }
@@ -1035,7 +1159,7 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Try adjusting your filter or search query to find previous client interactions.',
+              'No active conversations yet.',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 13,
@@ -1043,6 +1167,23 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
                 height: 1.4,
               ),
             ),
+            if (_activeContacts.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => _openChat(_activeContacts.first),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(LucideIcons.messageSquare, size: 16),
+                label: Text(
+                  'Message ${_activeContacts.first.fullName}',
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1087,21 +1228,74 @@ class _MessagesInboxScreenState extends State<MessagesInboxScreen> {
   }
 
   Widget _buildBottomNavigationBar() {
+    final role = FirebaseService.instance.currentRole;
+    final isFreelancer = role == 'freelancer';
+
+    if (isFreelancer) {
+      return BottomNavigationBar(
+        currentIndex: 3, // Inbox tab active
+        onTap: (index) {
+          if (index == 0) {
+            Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
+          } else if (index == 1) {
+            Navigator.of(context).pushReplacementNamed('/buyer-requests');
+          } else if (index == 2) {
+            Navigator.of(context).pushReplacementNamed('/orders');
+          } else if (index == 3) {
+            setState(() => _currentNavIndex = 3);
+          } else if (index == 4) {
+            Navigator.of(context).pushNamed('/escrow-payments');
+          }
+        },
+        backgroundColor: Colors.white,
+        selectedItemColor: AppColors.primaryDark,
+        unselectedItemColor: AppColors.textSecondary,
+        selectedLabelStyle: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+        ),
+        unselectedLabelStyle: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w500,
+        ),
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.layoutDashboard, size: 19),
+            label: 'Dashboard',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.inbox, size: 19),
+            label: 'Requests',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.clipboardList, size: 19),
+            label: 'Orders',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.messageSquare, size: 19),
+            label: 'Inbox',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(LucideIcons.wallet, size: 19),
+            label: 'Earnings',
+          ),
+        ],
+      );
+    }
+
     return BottomNavigationBar(
       currentIndex: _currentNavIndex,
       onTap: (index) {
         setState(() => _currentNavIndex = index);
         if (index == 0) {
           Navigator.of(context).pushReplacementNamed('/client-home');
+        } else if (index == 1) {
+          Navigator.of(context).pushNamed('/post-task');
         } else if (index == 2) {
           Navigator.of(context).pushNamed('/project-workspace');
-        } else if (index == 1) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Explore talent and project listings.'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+        } else if (index == 3) {
+          // Already on messages
         } else if (index == 4) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(

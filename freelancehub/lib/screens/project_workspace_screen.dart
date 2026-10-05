@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../core/firebase/firebase_config.dart';
+import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
 import '../models/project_model.dart';
 import '../services/client_service.dart';
+import '../services/notification_service.dart';
 
 /// Screen 04 — Project Workspace
 /// Built according to FreelanceHub Design System (docs/design.md, .agents/rules/ui-design.md)
@@ -52,11 +54,58 @@ class _ProjectWorkspaceScreenState extends State<ProjectWorkspaceScreen> {
 
   // Activity Log
   late List<Map<String, dynamic>> _activities;
+  ProjectModel? _activeProject;
 
   @override
   void initState() {
     super.initState();
+    _activeProject = widget.project;
     _initWorkspaceData();
+    _loadProjectIfNull();
+  }
+
+  Future<void> _loadProjectIfNull() async {
+    if (!FirebaseConfig.instance.isInitialized) return;
+    try {
+      final uid = FirebaseService.instance.currentUser?.uid;
+      if (uid == null) return;
+      final isClient = FirebaseService.instance.currentRole == 'client';
+
+      List<ProjectModel> projects = [];
+      if (_activeProject != null) {
+        projects = [_activeProject!];
+      } else {
+        projects = isClient
+            ? await FirebaseService.instance.projectRepository.getProjectsForClient(uid)
+            : await FirebaseService.instance.projectRepository.getProjectsForFreelancer(uid);
+      }
+
+      if (projects.isNotEmpty && mounted) {
+        final p = projects.first;
+        setState(() {
+          _activeProject = p;
+          _contractId = p.id.startsWith('FH-')
+              ? p.id
+              : 'FH-${p.id.length > 5 ? p.id.substring(0, 5).toUpperCase() : p.id.toUpperCase()}';
+          _projectTitle = p.title;
+          if (p.freelancerName.isNotEmpty) {
+            _freelancerName = p.freelancerName;
+          }
+          if (p.budget > 0) {
+            _totalValue = p.budget;
+            _inEscrow = _totalValue - _released;
+          }
+          _completedMilestones = p.completedMilestones;
+          _totalMilestones = p.totalMilestones > 0 ? p.totalMilestones : 3;
+          _progressPercent = (_completedMilestones / _totalMilestones).clamp(0.0, 1.0);
+          if (p.status == 'completed') {
+            _milestone2Approved = true;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Notice loading project in workspace: $e');
+    }
   }
 
   void _initWorkspaceData() {
@@ -226,14 +275,50 @@ class _ProjectWorkspaceScreenState extends State<ProjectWorkspaceScreen> {
     setState(() => _isProcessingAction = true);
 
     // Call service if live Firebase is initialized
-    if (FirebaseConfig.instance.isInitialized && widget.project != null) {
+    if (FirebaseConfig.instance.isInitialized) {
       try {
+        final prj = _activeProject ?? widget.project;
+        String projectId = prj?.id ?? '';
+        String freelancerId = prj?.freelancerId ?? 'dGHpEXlNcJVaQkV9pQfXuSvAl0y2';
+        String milestoneTitle = prj?.title ?? 'Project Delivery';
+        double amount = (prj != null && prj.budget > 0) ? prj.budget : 400.0;
+        String milestoneId = 'm-2';
+
+        if (projectId.isNotEmpty) {
+          try {
+            final cleanId = projectId.replaceFirst('FH-', '');
+            final milestones = await FirebaseService.instance.milestoneRepository
+                .getMilestonesForProject(cleanId);
+            if (milestones.isNotEmpty) {
+              final activeMilestone = milestones.firstWhere(
+                (m) => m.status != 'approved',
+                orElse: () => milestones.first,
+              );
+              milestoneId = activeMilestone.id;
+              milestoneTitle = activeMilestone.title;
+              amount = activeMilestone.amount;
+            }
+          } catch (_) {}
+        } else {
+          final uid = FirebaseService.instance.currentUser?.uid;
+          if (uid != null) {
+            final clientProjects = await FirebaseService.instance.projectRepository.getProjectsForClient(uid);
+            if (clientProjects.isNotEmpty) {
+              final firstP = clientProjects.first;
+              projectId = firstP.id;
+              freelancerId = firstP.freelancerId;
+              amount = firstP.budget > 0 ? firstP.budget : 400.0;
+              milestoneTitle = firstP.title;
+            }
+          }
+        }
+
         await ClientService.instance.reviewMilestoneDeliverable(
-          projectId: widget.project!.id,
-          milestoneId: 'm-2',
-          freelancerId: widget.project!.freelancerId,
-          milestoneTitle: 'Explore & Task Details Screens',
-          amount: 400.0,
+          projectId: projectId.isNotEmpty ? projectId : 'active_project',
+          milestoneId: milestoneId,
+          freelancerId: freelancerId,
+          milestoneTitle: milestoneTitle,
+          amount: amount,
           approved: true,
         );
       } catch (e) {
@@ -422,6 +507,22 @@ class _ProjectWorkspaceScreenState extends State<ProjectWorkspaceScreen> {
   }
 
   void _submitRevision(String note) {
+    if (FirebaseConfig.instance.isInitialized && widget.project != null) {
+      try {
+        FirebaseService.instance.projectRepository
+            .updateProjectStatus(widget.project!.id, 'revision');
+        NotificationService.instance.notifyRevisionRequested(
+          freelancerUserId: widget.project!.freelancerId,
+          clientName: widget.project!.clientName,
+          projectTitle: widget.project!.title,
+          projectId: widget.project!.id,
+          note: note,
+        );
+      } catch (e) {
+        debugPrint('Notice requesting revision in Firestore: $e');
+      }
+    }
+
     setState(() {
       _milestone2InRevision = true;
       _revisionNote = note;
@@ -764,6 +865,11 @@ class _ProjectWorkspaceScreenState extends State<ProjectWorkspaceScreen> {
               color: AppColors.primaryDark,
             ),
           ),
+        ),
+        IconButton(
+          tooltip: 'Messages',
+          icon: const Icon(LucideIcons.messageSquare, size: 20, color: AppColors.textDark),
+          onPressed: () => Navigator.of(context).pushNamed('/messages'),
         ),
         IconButton(
           icon: const Icon(LucideIcons.bell, size: 20, color: AppColors.textDark),
@@ -2027,14 +2133,7 @@ class _ProjectWorkspaceScreenState extends State<ProjectWorkspaceScreen> {
             icon: LucideIcons.messageSquare,
             label: 'Messages',
             isActive: false,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Client Messages: 2 active freelancer conversations.'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
+            onTap: () => Navigator.of(context).pushNamed('/messages'),
           ),
           _buildNavItem(
             icon: LucideIcons.user,

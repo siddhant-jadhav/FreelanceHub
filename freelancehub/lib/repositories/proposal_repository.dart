@@ -30,6 +30,14 @@ class ProposalRepository {
     try {
       final docRef = await _proposals.add(proposal.toMap());
       await _taskRepository.incrementOffersCount(proposal.taskId);
+      // Mirror to Realtime DB
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('proposals/${docRef.id}').set({
+          ...proposal.toMap(),
+          'id': docRef.id,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
       return docRef.id;
     } catch (e) {
       throw AppException.from(e);
@@ -52,12 +60,13 @@ class ProposalRepository {
     try {
       final snapshot = await _proposals
           .where('taskId', isEqualTo: taskId)
-          .orderBy('createdAt', descending: true)
           .get();
 
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => ProposalModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     } catch (e) {
       throw AppException.from(e);
     }
@@ -67,12 +76,13 @@ class ProposalRepository {
   Stream<List<ProposalModel>> streamProposalsForTask(String taskId) {
     return _proposals
         .where('taskId', isEqualTo: taskId)
-        .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => ProposalModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
   }
 
@@ -80,12 +90,13 @@ class ProposalRepository {
   Stream<List<ProposalModel>> streamFreelancerProposals(String freelancerId) {
     return _proposals
         .where('freelancerId', isEqualTo: freelancerId)
-        .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => ProposalModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
   }
 

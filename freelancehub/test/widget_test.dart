@@ -128,6 +128,7 @@ void main() {
     expect(find.text('Top Rated Freelancers'), findsOneWidget);
     expect(find.text('Top Recommended For You'), findsOneWidget);
     expect(find.text('Active Deliveries'), findsOneWidget);
+    expect(find.text('My Posted Tasks'), findsOneWidget);
     expect(find.text('Find vetted experts or kickstart a project'), findsOneWidget);
     expect(find.text('+ Post a Task'), findsOneWidget);
     expect(find.text('AI Brief Writer'), findsOneWidget);

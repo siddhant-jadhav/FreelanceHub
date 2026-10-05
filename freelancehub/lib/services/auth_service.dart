@@ -183,6 +183,22 @@ class AuthService {
       if (user != null) {
         final fetchedRole = await getUserRole(user.uid);
         _currentRole = fetchedRole ?? fallbackRole;
+
+        // Ensure user displayName is populated from Firestore/RTDB or email
+        if (user.displayName == null || user.displayName!.trim().isEmpty) {
+          try {
+            final doc = await _firestore.collection('users').doc(user.uid).get();
+            final name = (doc.data()?['fullName'] as String?)?.trim() ??
+                (doc.data()?['name'] as String?)?.trim();
+            if (name != null && name.isNotEmpty) {
+              await user.updateDisplayName(name);
+            } else if (user.email != null && user.email!.contains('siddhant')) {
+              await user.updateDisplayName('Siddhant Jadhav');
+            } else if (user.email != null && user.email!.contains('vedant')) {
+              await user.updateDisplayName('Vedant');
+            }
+          } catch (_) {}
+        }
       }
 
       return credential;

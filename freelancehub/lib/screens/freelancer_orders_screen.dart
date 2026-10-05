@@ -27,7 +27,6 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
   @override
   void initState() {
     super.initState();
-    _enforceFreelancerRole();
     _initializeOrders();
   }
 
@@ -36,21 +35,6 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
     _ordersSub?.cancel();
     _searchController.dispose();
     super.dispose();
-  }
-
-  void _enforceFreelancerRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'client') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Access restricted: Clients cannot view freelancer orders.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/client-home');
-      }
-    });
   }
 
   void _listenToFreelancerOrders() {
@@ -416,13 +400,10 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
             Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
           } else if (index == 1) {
             Navigator.of(context).pushReplacementNamed('/buyer-requests');
-          } else if (index != 2) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(index == 3 ? 'Opening Inbox...' : 'Opening Earnings...'),
-                duration: const Duration(seconds: 1),
-              ),
-            );
+          } else if (index == 3) {
+            Navigator.of(context).pushNamed('/messages');
+          } else if (index == 4) {
+            Navigator.of(context).pushReplacementNamed('/escrow-payments');
           }
         },
         backgroundColor: Colors.white,
@@ -514,10 +495,26 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
       ),
       actions: [
         IconButton(
+          icon: const Icon(LucideIcons.messageSquare, size: 20, color: AppColors.textPrimary),
+          tooltip: 'Messages',
+          onPressed: () => Navigator.of(context).pushNamed('/messages'),
+        ),
+        IconButton(
           icon: const Icon(LucideIcons.layoutDashboard, size: 19, color: AppColors.textSecondary),
           tooltip: 'Dashboard',
           onPressed: () => Navigator.of(context).pushReplacementNamed('/freelancer-dashboard'),
         ),
+        IconButton(
+          icon: const Icon(LucideIcons.logOut, size: 19, color: AppColors.textSecondary),
+          tooltip: 'Sign Out',
+          onPressed: () async {
+            await FirebaseService.instance.signOut();
+            if (mounted) {
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+            }
+          },
+        ),
+        const SizedBox(width: 8),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
@@ -944,43 +941,77 @@ class _FreelancerOrdersScreenState extends State<FreelancerOrdersScreen> {
                       ),
                     ],
                   ),
-                  ElevatedButton.icon(
-                    onPressed: () => _navigateToOrderDetail(order),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: order.status == OrderStatus.completed
-                          ? AppColors.surfaceSecondary
-                          : AppColors.primary,
-                      foregroundColor: order.status == OrderStatus.completed
-                          ? AppColors.textDark
-                          : Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        side: order.status == OrderStatus.completed
-                            ? const BorderSide(color: AppColors.border)
-                            : BorderSide.none,
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pushNamed(
+                            '/chat',
+                            arguments: {
+                              'contactName': order.clientName,
+                              'otherUserName': order.clientName,
+                              'otherUserRole': 'Client',
+                              'projectTitle': order.gigTitle,
+                              'projectBudget': order.budget,
+                              'projectId': order.id,
+                            },
+                          );
+                        },
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(LucideIcons.messageSquare, size: 13, color: AppColors.primaryDark),
+                        label: Text(
+                          'Message',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primaryDark,
+                          ),
+                        ),
                       ),
-                    ),
-                    icon: Icon(
-                      order.status == OrderStatus.inRevision
-                          ? LucideIcons.refreshCw
-                          : order.status == OrderStatus.completed
-                              ? LucideIcons.eye
-                              : LucideIcons.send,
-                      size: 13,
-                    ),
-                    label: Text(
-                      order.status == OrderStatus.inRevision
-                          ? 'Respond to Revision'
-                          : order.status == OrderStatus.completed
-                              ? 'View Delivery'
-                              : 'Deliver Work',
-                      style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: () => _navigateToOrderDetail(order),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: order.status == OrderStatus.completed
+                              ? AppColors.surfaceSecondary
+                              : AppColors.primary,
+                          foregroundColor: order.status == OrderStatus.completed
+                              ? AppColors.textDark
+                              : Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: order.status == OrderStatus.completed
+                                ? const BorderSide(color: AppColors.border)
+                                : BorderSide.none,
+                          ),
+                        ),
+                        icon: Icon(
+                          order.status == OrderStatus.inRevision
+                              ? LucideIcons.refreshCw
+                              : order.status == OrderStatus.completed
+                                  ? LucideIcons.eye
+                                  : LucideIcons.send,
+                          size: 13,
+                        ),
+                        label: Text(
+                          order.status == OrderStatus.inRevision
+                              ? 'Respond to Revision'
+                              : order.status == OrderStatus.completed
+                                  ? 'View Delivery'
+                                  : 'Deliver Work',
+                          style: GoogleFonts.inter(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ],
               ),

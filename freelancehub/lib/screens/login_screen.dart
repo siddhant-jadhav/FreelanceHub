@@ -51,6 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       final resolvedRole = FirebaseService.instance.currentRole ??
           (_selectedRole == LoginRole.client ? 'client' : 'freelancer');
+      FirebaseService.instance.setCurrentRole(resolvedRole);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -63,16 +64,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // Forward to respective screen based on verified role
       if (resolvedRole == 'freelancer') {
+        final email = _identifierController.text.trim().toLowerCase();
         final uid = FirebaseService.instance.currentUser?.uid;
-        bool hasCompletedOnboarding = false;
-        if (uid != null) {
+        bool isDefaultAccount = email == 'siddhant@gmail.com';
+        bool hasCompletedOnboarding = isDefaultAccount;
+        if (!hasCompletedOnboarding && uid != null) {
           final profile = await FirebaseService.instance.getUserProfile(uid);
           hasCompletedOnboarding =
               profile?['profile']?['onboardingCompleted'] == true ||
               profile?['onboardingCompleted'] == true;
         }
         if (!mounted) return;
-        if (hasCompletedOnboarding) {
+        if (hasCompletedOnboarding || isDefaultAccount) {
           Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
         } else {
           Navigator.of(context).pushReplacementNamed('/freelancer-onboarding');

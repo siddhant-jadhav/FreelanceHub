@@ -81,16 +81,41 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
   double _availableWithdrawal = 1280.00;
   double _earnedThisMonth = 3450.00;
   double _pendingClearance = 940.00;
+  String _freelancerName = 'Siddhant Jadhav';
 
   late List<FreelancerContract> _contracts;
+  List<ProjectModel> _firebaseProjects = [];
+  List<PaymentModel> _firebasePayments = [];
   StreamSubscription<List<ProjectModel>>? _projectsSub;
   StreamSubscription<List<PaymentModel>>? _paymentsSub;
 
   @override
   void initState() {
     super.initState();
-    _enforceFreelancerRole();
     _initializeContracts();
+    _loadFreelancerProfile();
+  }
+
+  void _loadFreelancerProfile() async {
+    final user = FirebaseService.instance.currentUser;
+    if (user != null) {
+      if (user.displayName != null && user.displayName!.trim().isNotEmpty) {
+        if (mounted) setState(() => _freelancerName = user.displayName!.trim());
+      }
+      try {
+        final profile = await FirebaseService.instance.getUserProfile(user.uid);
+        final name = (profile?['fullName'] as String?)?.trim() ??
+            (profile?['name'] as String?)?.trim();
+        if (name != null && name.isNotEmpty) {
+          if (mounted) setState(() => _freelancerName = name);
+          user.updateDisplayName(name).catchError((_) {});
+          return;
+        }
+      } catch (_) {}
+      if (user.email != null && user.email!.contains('siddhant')) {
+        if (mounted) setState(() => _freelancerName = 'Siddhant Jadhav');
+      }
+    }
   }
 
   @override
@@ -100,18 +125,44 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
     super.dispose();
   }
 
-  void _enforceFreelancerRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'client') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Access restricted: Clients cannot view freelancer dashboard.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/client-home');
+  void _recalculateEarnings() {
+    double released = 0.0;
+    double pending = 0.0;
+    final Set<String> projectsWithReleasedPayments = {};
+
+    for (final p in _firebasePayments) {
+      if (p.status == 'released') {
+        released += p.amount;
+        final cleanId = p.projectId.replaceFirst('FH-', '').toLowerCase().trim();
+        if (cleanId.isNotEmpty) {
+          projectsWithReleasedPayments.add(cleanId);
+        }
+      } else if (p.status == 'held_in_escrow') {
+        pending += p.amount;
       }
+    }
+
+    for (final prj in _firebaseProjects) {
+      final cleanId = prj.id.replaceFirst('FH-', '').toLowerCase().trim();
+      if (prj.status == 'completed') {
+        if (!projectsWithReleasedPayments.contains(cleanId)) {
+          released += prj.budget;
+          projectsWithReleasedPayments.add(cleanId);
+        }
+      } else if (prj.status == 'in_progress' || prj.status == 'delivered' || prj.status == 'review') {
+        final hasPending = _firebasePayments.any((p) =>
+            p.status == 'held_in_escrow' &&
+            p.projectId.replaceFirst('FH-', '').toLowerCase().trim() == cleanId);
+        if (!hasPending && prj.budget > 0) {
+          pending += prj.budget;
+        }
+      }
+    }
+
+    setState(() {
+      _availableWithdrawal = released;
+      _earnedThisMonth = released;
+      _pendingClearance = pending;
     });
   }
 
@@ -124,6 +175,7 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
           .streamProjectsForFreelancer(uid)
           .listen((projects) {
         if (!mounted) return;
+        _firebaseProjects = projects;
         setState(() {
           _contracts = projects.map((p) {
             final dueDiff = p.dueDate.difference(DateTime.now()).inDays;
@@ -145,6 +197,7 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
             );
           }).toList();
         });
+        _recalculateEarnings();
       }, onError: (e) {
         debugPrint('Error streaming freelancer projects: $e');
       });
@@ -162,20 +215,8 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
           .streamUserPayments(uid, isClient: false)
           .listen((payments) {
         if (!mounted) return;
-        double released = 0.0;
-        double pending = 0.0;
-        for (final p in payments) {
-          if (p.status == 'released') {
-            released += p.amount;
-          } else if (p.status == 'held_in_escrow') {
-            pending += p.amount;
-          }
-        }
-        setState(() {
-          _availableWithdrawal = released;
-          _earnedThisMonth = released;
-          _pendingClearance = pending;
-        });
+        _firebasePayments = payments;
+        _recalculateEarnings();
       }, onError: (e) {
         debugPrint('Error streaming payments: $e');
       });
@@ -315,7 +356,10 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              Navigator.of(context).pushNamed('/order-delivery');
+              Navigator.of(context).pushNamed(
+                '/order-delivery',
+                arguments: contract,
+              );
             },
             child: Text(
               'Full Delivery Studio',
@@ -327,8 +371,17 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
             ),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
+              if (FirebaseConfig.instance.isInitialized) {
+                try {
+                  await FirebaseService.instance.projectRepository
+                      .updateProjectStatus(contract.id, 'review');
+                } catch (e) {
+                  debugPrint('Notice updating project status: $e');
+                }
+              }
+              if (!mounted) return;
               setState(() {
                 final index = _contracts.indexWhere((c) => c.id == contract.id);
                 if (index != -1) {
@@ -429,8 +482,17 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
             ),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
+              if (FirebaseConfig.instance.isInitialized) {
+                try {
+                  await FirebaseService.instance.projectRepository
+                      .updateProjectStatus(contract.id, 'review');
+                } catch (e) {
+                  debugPrint('Notice updating revision delivery status: $e');
+                }
+              }
+              if (!mounted) return;
               setState(() {
                 final index = _contracts.indexWhere((c) => c.id == contract.id);
                 if (index != -1) {
@@ -464,12 +526,16 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
   }
 
   void _handleMessageClient(FreelancerContract contract) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Opening chat with ${contract.clientName}...'),
-        backgroundColor: AppColors.textPrimary,
-        duration: const Duration(seconds: 2),
-      ),
+    Navigator.of(context).pushNamed(
+      '/chat',
+      arguments: {
+        'contactName': contract.clientName,
+        'otherUserName': contract.clientName,
+        'otherUserRole': 'Client',
+        'projectTitle': contract.title,
+        'projectBudget': contract.amount,
+        'projectId': contract.id,
+      },
     );
   }
 
@@ -742,10 +808,9 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
 
   /// Top App Bar: Brand mark, "SELLER HUB", Mode switcher, Notification Bell, User Avatar
   PreferredSizeWidget _buildTopHeader(BuildContext context) {
-    final user = FirebaseService.instance.currentUser;
-    final String initial = (user?.displayName?.isNotEmpty == true)
-        ? user!.displayName![0].toUpperCase()
-        : 'A';
+    final String initial = _freelancerName.isNotEmpty
+        ? _freelancerName[0].toUpperCase()
+        : 'S';
 
     return AppBar(
       backgroundColor: Colors.white,
@@ -808,7 +873,21 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
             color: AppColors.textSecondary,
           ),
           onPressed: () {
-            Navigator.of(context).pushNamed('/client-home');
+            FirebaseService.instance.setCurrentRole('client');
+            Navigator.of(context).pushReplacementNamed('/client-home');
+          },
+        ),
+
+        // Messages
+        IconButton(
+          tooltip: 'Messages',
+          icon: const Icon(
+            LucideIcons.messageSquare,
+            size: 20,
+            color: AppColors.textPrimary,
+          ),
+          onPressed: () {
+            Navigator.of(context).pushNamed('/messages');
           },
         ),
 
@@ -842,16 +921,9 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
 
         // User Avatar Button
         Padding(
-          padding: const EdgeInsets.only(right: 16, left: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: GestureDetector(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Logged in as ${user?.displayName ?? 'Alex Rivera'}'),
-                  backgroundColor: AppColors.textPrimary,
-                ),
-              );
-            },
+            onTap: _showProfileSheet,
             child: CircleAvatar(
               radius: 15,
               backgroundColor: AppColors.primaryLight,
@@ -866,14 +938,197 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
             ),
           ),
         ),
+
+        // Sign Out Button
+        IconButton(
+          tooltip: 'Sign Out ($_freelancerName)',
+          icon: const Icon(
+            LucideIcons.logOut,
+            size: 19,
+            color: AppColors.textSecondary,
+          ),
+          onPressed: _showLogoutConfirmDialog,
+        ),
+        const SizedBox(width: 8),
       ],
+    );
+  }
+
+  void _handleLogout() async {
+    await FirebaseService.instance.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+  }
+
+  void _showLogoutConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(LucideIcons.logOut, color: AppColors.error, size: 22),
+            const SizedBox(width: 8),
+            Text(
+              'Sign Out',
+              style: GoogleFonts.inter(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to sign out of $_freelancerName?',
+          style: GoogleFonts.inter(fontSize: 13.5, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.inter(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _handleLogout();
+            },
+            child: Text(
+              'Sign Out',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showProfileSheet() {
+    final user = FirebaseService.instance.currentUser;
+    final email = user?.email ?? 'siddhant@gmail.com';
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: Colors.white,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              CircleAvatar(
+                radius: 32,
+                backgroundColor: AppColors.primaryLight,
+                child: Text(
+                  _freelancerName.isNotEmpty ? _freelancerName[0].toUpperCase() : 'S',
+                  style: GoogleFonts.inter(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primaryDark,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _freelancerName,
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                email,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSecondary,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  'Freelancer Account',
+                  style: GoogleFonts.inter(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primaryDark,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(LucideIcons.arrowLeftRight, color: AppColors.textPrimary, size: 20),
+                title: Text('Switch to Client View', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600)),
+                trailing: const Icon(LucideIcons.chevronRight, size: 18, color: AppColors.textSecondary),
+                contentPadding: EdgeInsets.zero,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  FirebaseService.instance.setCurrentRole('client');
+                  Navigator.of(context).pushReplacementNamed('/client-home');
+                },
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.wallet, color: AppColors.textPrimary, size: 20),
+                title: Text('Escrow Earnings & Payments', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600)),
+                trailing: const Icon(LucideIcons.chevronRight, size: 18, color: AppColors.textSecondary),
+                contentPadding: EdgeInsets.zero,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).pushNamed('/escrow-payments');
+                },
+              ),
+              ListTile(
+                leading: const Icon(LucideIcons.logOut, color: AppColors.error, size: 20),
+                title: Text('Sign Out', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.error)),
+                contentPadding: EdgeInsets.zero,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showLogoutConfirmDialog();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   /// 1. Profile Summary Card
   Widget _buildProfileSummaryCard() {
-    final user = FirebaseService.instance.currentUser;
-    final userName = user?.displayName ?? 'Alex Rivera';
+    final userName = _freelancerName;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -900,7 +1155,7 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
                     radius: 26,
                     backgroundColor: AppColors.surfaceSecondary,
                     child: Text(
-                      userName.isNotEmpty ? userName[0].toUpperCase() : 'A',
+                      userName.isNotEmpty ? userName[0].toUpperCase() : 'S',
                       style: GoogleFonts.inter(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
@@ -2085,6 +2340,12 @@ class _FreelancerDashboardScreenState extends State<FreelancerDashboardScreen> {
           Navigator.of(context).pushNamed('/buyer-requests');
         } else if (index == 2) {
           Navigator.of(context).pushNamed('/orders');
+        } else if (index == 3) {
+          Navigator.of(context).pushNamed('/messages').then((_) {
+            if (mounted) setState(() => _currentBottomNavIndex = 0);
+          });
+        } else if (index == 4) {
+          Navigator.of(context).pushNamed('/escrow-payments');
         } else {
           setState(() => _currentBottomNavIndex = index);
         }

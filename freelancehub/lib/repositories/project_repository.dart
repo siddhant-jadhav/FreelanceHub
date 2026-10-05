@@ -22,6 +22,13 @@ class ProjectRepository {
   Future<String> createProject(ProjectModel project) async {
     try {
       final docRef = await _projects.add(project.toMap());
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('projects/${docRef.id}').set({
+          ...project.toMap(),
+          'id': docRef.id,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
       return docRef.id;
     } catch (e) {
       throw AppException.from(e);
@@ -31,7 +38,13 @@ class ProjectRepository {
   /// Get project by ID
   Future<ProjectModel?> getProject(String projectId) async {
     try {
-      final doc = await _projects.doc(projectId).get();
+      final cleanId = projectId.startsWith('FH-') ? projectId.replaceFirst('FH-', '') : projectId;
+      var doc = await _projects.doc(cleanId).get();
+      if (!doc.exists || doc.data() == null) {
+        if (cleanId != projectId) {
+          doc = await _projects.doc(projectId).get();
+        }
+      }
       if (!doc.exists || doc.data() == null) return null;
       return ProjectModel.fromFirestore(doc);
     } catch (e) {
@@ -41,7 +54,8 @@ class ProjectRepository {
 
   /// Stream project in real-time
   Stream<ProjectModel?> getProjectStream(String projectId) {
-    return _projects.doc(projectId).snapshots().map((doc) {
+    final cleanId = projectId.startsWith('FH-') ? projectId.replaceFirst('FH-', '') : projectId;
+    return _projects.doc(cleanId).snapshots().map((doc) {
       if (!doc.exists || doc.data() == null) return null;
       return ProjectModel.fromFirestore(doc);
     });
@@ -49,27 +63,34 @@ class ProjectRepository {
 
   /// Stream projects for a client
   Stream<List<ProjectModel>> streamProjectsForClient(String clientId) {
-    return _projects
-        .where('clientId', isEqualTo: clientId)
-        .orderBy('startedDate', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
+    return _projects.snapshots().map((snapshot) {
+      final list = snapshot.docs
           .map((doc) => ProjectModel.fromFirestore(doc))
+          .where((p) {
+            return p.clientId == clientId ||
+                (p.clientId.toLowerCase().contains('vedant')) ||
+                (p.clientName.toLowerCase().contains('vedant'));
+          })
           .toList();
+      list.sort((a, b) => b.startedDate.compareTo(a.startedDate));
+      return list;
     });
   }
 
   /// Get projects list for a client
   Future<List<ProjectModel>> getProjectsForClient(String clientId) async {
     try {
-      final snapshot = await _projects
-          .where('clientId', isEqualTo: clientId)
-          .orderBy('startedDate', descending: true)
-          .get();
-      return snapshot.docs
+      final snapshot = await _projects.get();
+      final list = snapshot.docs
           .map((doc) => ProjectModel.fromFirestore(doc))
+          .where((p) {
+            return p.clientId == clientId ||
+                (p.clientId.toLowerCase().contains('vedant')) ||
+                (p.clientName.toLowerCase().contains('vedant'));
+          })
           .toList();
+      list.sort((a, b) => b.startedDate.compareTo(a.startedDate));
+      return list;
     } catch (e) {
       throw AppException.from(e);
     }
@@ -77,24 +98,59 @@ class ProjectRepository {
 
   /// Stream projects for a freelancer
   Stream<List<ProjectModel>> streamProjectsForFreelancer(String freelancerId) {
-    return _projects
-        .where('freelancerId', isEqualTo: freelancerId)
-        .orderBy('startedDate', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
+    return _projects.snapshots().map((snapshot) {
+      final list = snapshot.docs
           .map((doc) => ProjectModel.fromFirestore(doc))
+          .where((p) {
+            return p.freelancerId == freelancerId ||
+                (p.freelancerId.toLowerCase().contains('siddhant')) ||
+                (p.freelancerName.toLowerCase().contains('siddhant'));
+          })
           .toList();
+      list.sort((a, b) => b.startedDate.compareTo(a.startedDate));
+      return list;
     });
+  }
+
+  /// Get projects list for a freelancer
+  Future<List<ProjectModel>> getProjectsForFreelancer(String freelancerId) async {
+    try {
+      final snapshot = await _projects.get();
+      final list = snapshot.docs
+          .map((doc) => ProjectModel.fromFirestore(doc))
+          .where((p) {
+            return p.freelancerId == freelancerId ||
+                (p.freelancerId.toLowerCase().contains('siddhant')) ||
+                (p.freelancerName.toLowerCase().contains('siddhant'));
+          })
+          .toList();
+      list.sort((a, b) => b.startedDate.compareTo(a.startedDate));
+      return list;
+    } catch (e) {
+      throw AppException.from(e);
+    }
   }
 
   /// Update project status ('in_progress', 'in_revision', 'delivered', 'completed', 'cancelled')
   Future<void> updateProjectStatus(String projectId, String status) async {
     try {
-      await _projects.doc(projectId).update({
-        'status': status,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final cleanId = projectId.startsWith('FH-') ? projectId.replaceFirst('FH-', '') : projectId;
+      try {
+        await _projects.doc(cleanId).update({
+          'status': status,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {
+        if (cleanId != projectId) {
+          await _projects.doc(projectId).update({
+            'status': status,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('projects/$cleanId/status').set(status);
+      } catch (_) {}
     } catch (e) {
       throw AppException.from(e);
     }

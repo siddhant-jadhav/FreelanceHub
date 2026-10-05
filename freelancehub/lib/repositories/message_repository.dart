@@ -101,12 +101,13 @@ class MessageRepository {
   Stream<List<MessageModel>> streamMessages(String conversationId) {
     return _messages
         .where('conversationId', isEqualTo: conversationId)
-        .orderBy('createdAt', descending: false)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => MessageModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return list;
     });
   }
 
@@ -114,12 +115,13 @@ class MessageRepository {
   Stream<List<ConversationModel>> streamUserConversations(String userId) {
     return _conversations
         .where('participantIds', arrayContains: userId)
-        .orderBy('lastMessageTime', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => ConversationModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+      return list;
     });
   }
 

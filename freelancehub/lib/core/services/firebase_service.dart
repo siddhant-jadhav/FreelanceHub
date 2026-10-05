@@ -27,6 +27,8 @@ class FirebaseService {
   FirebaseService._();
   static final FirebaseService instance = FirebaseService._();
 
+  static bool get isInitialized => FirebaseConfig.instance.isInitialized;
+
   // Core Firebase handles
   FirebaseAuth get auth => FirebaseConfig.instance.auth;
   FirebaseFirestore get firestore => FirebaseConfig.instance.firestore;

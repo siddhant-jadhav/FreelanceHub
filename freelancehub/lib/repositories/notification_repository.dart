@@ -32,12 +32,13 @@ class NotificationRepository {
   Stream<List<NotificationModel>> streamUserNotifications(String userId) {
     return _notifications
         .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => NotificationModel.fromFirestore(doc))
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
   }
 

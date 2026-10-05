@@ -5,7 +5,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../core/firebase/firebase_config.dart';
 import '../core/services/firebase_service.dart';
 import '../core/theme/app_colors.dart';
+import '../models/proposal_model.dart';
 import '../models/task_model.dart';
+import '../services/notification_service.dart';
 
 /// Data model representing a Buyer Request / Opportunity
 class BuyerRequest {
@@ -78,23 +80,7 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
   @override
   void initState() {
     super.initState();
-    _enforceFreelancerRole();
     _initializeRequests();
-  }
-
-  void _enforceFreelancerRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'client') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Access restricted: Clients cannot view buyer requests.'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/client-home');
-      }
-    });
   }
 
   void _listenToFirebaseTasks() {
@@ -307,8 +293,10 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (modalContext, setModalState) {
+      builder: (ctx) {
+        bool isSubmitting = false;
+        return StatefulBuilder(
+          builder: (modalContext, setModalState) {
           return Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -641,31 +629,95 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: () {
-                        if (pitchController.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please write a brief proposal cover letter.'),
-                              backgroundColor: AppColors.error,
-                            ),
-                          );
-                          return;
-                        }
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              final pitch = pitchController.text.trim();
+                              if (pitch.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please write a brief proposal cover letter.'),
+                                    backgroundColor: AppColors.error,
+                                  ),
+                                );
+                                return;
+                              }
 
-                        Navigator.pop(ctx);
-                        setState(() {
-                          request.hasSubmittedOffer = true;
-                          request.offersSent += 1;
-                          request.submittedPitch = pitchController.text.trim();
-                          request.submittedAmount =
-                              double.tryParse(priceController.text) ?? request.budget;
-                          request.submittedDays =
-                              int.tryParse(daysController.text) ?? request.deliveryDays;
-                          _dailyOffersRemaining -= 1;
-                        });
+                              final proposedPrice =
+                                  double.tryParse(priceController.text) ?? request.budget;
+                              final proposedDays =
+                                  int.tryParse(daysController.text) ?? request.deliveryDays;
 
-                        _showOfferSuccessDialog(request);
-                      },
+                              setModalState(() => isSubmitting = true);
+
+                              try {
+                                if (FirebaseConfig.instance.isInitialized) {
+                                  final currentUid = FirebaseService.instance.currentUser?.uid ??
+                                      'dGHpEXlNcJVaQkV9pQfXuSvAl0y2';
+                                  final userProfile =
+                                      await FirebaseService.instance.getUserProfile(currentUid);
+                                  final freelancerName = userProfile?['fullName'] ??
+                                      FirebaseService.instance.currentUser?.displayName ??
+                                      'Siddhant Jadhav';
+
+                                  // Fetch task to get clientId if available
+                                  final task = await FirebaseService.instance.taskRepository
+                                      .getTask(request.id);
+                                  final clientId = task?.clientId ?? '';
+
+                                  final proposal = ProposalModel(
+                                    id: '',
+                                    taskId: request.id,
+                                    taskTitle: request.title,
+                                    clientId: clientId,
+                                    freelancerId: currentUid,
+                                    freelancerName: freelancerName,
+                                    proposedPrice: proposedPrice,
+                                    deliveryTimeDays: proposedDays,
+                                    coverLetter: pitch,
+                                    milestones: const [],
+                                    status: 'pending',
+                                    createdAt: DateTime.now(),
+                                  );
+
+                                  await FirebaseService.instance.proposalRepository
+                                      .submitProposal(proposal);
+
+                                  if (clientId.isNotEmpty) {
+                                    await NotificationService.instance.notifyNewProposal(
+                                      clientUserId: clientId,
+                                      freelancerName: freelancerName,
+                                      taskTitle: request.title,
+                                      taskId: request.id,
+                                    );
+                                  }
+                                }
+
+                                if (!mounted) return;
+                                if (ctx.mounted) {
+                                  Navigator.pop(ctx);
+                                }
+                                setState(() {
+                                  request.hasSubmittedOffer = true;
+                                  request.offersSent += 1;
+                                  request.submittedPitch = pitch;
+                                  request.submittedAmount = proposedPrice;
+                                  request.submittedDays = proposedDays;
+                                  _dailyOffersRemaining -= 1;
+                                });
+
+                                _showOfferSuccessDialog(request);
+                              } catch (e) {
+                                if (!mounted) return;
+                                setModalState(() => isSubmitting = false);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed to submit proposal: $e'),
+                                    backgroundColor: AppColors.error,
+                                  ),
+                                );
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -674,9 +726,18 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      icon: const Icon(LucideIcons.send, size: 16),
+                      icon: isSubmitting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Icon(LucideIcons.send, size: 16),
                       label: Text(
-                        'Submit Proposal (Uses 1 Offer)',
+                        isSubmitting ? 'Submitting Proposal...' : 'Submit Proposal (Uses 1 Offer)',
                         style: GoogleFonts.inter(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w700,
@@ -689,8 +750,9 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
             ),
           );
         },
-      ),
-    );
+      );
+    },
+  );
   }
 
   void _showOfferSuccessDialog(BuyerRequest request) {
@@ -870,16 +932,11 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
           if (index == 0) {
             Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
           } else if (index == 2) {
-            Navigator.of(context).pushNamed('/orders');
-          } else if (index != 1) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  index == 3 ? 'Opening Inbox...' : 'Opening Earnings...',
-                ),
-                duration: const Duration(seconds: 1),
-              ),
-            );
+            Navigator.of(context).pushReplacementNamed('/orders');
+          } else if (index == 3) {
+            Navigator.of(context).pushNamed('/messages');
+          } else if (index == 4) {
+            Navigator.of(context).pushReplacementNamed('/escrow-payments');
           }
         },
         backgroundColor: Colors.white,
@@ -973,6 +1030,17 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
       ),
       actions: [
         IconButton(
+          tooltip: 'Messages',
+          icon: const Icon(
+            LucideIcons.messageSquare,
+            size: 20,
+            color: AppColors.textPrimary,
+          ),
+          onPressed: () {
+            Navigator.of(context).pushNamed('/messages');
+          },
+        ),
+        IconButton(
           tooltip: 'Dashboard',
           icon: const Icon(
             LucideIcons.layoutDashboard,
@@ -981,6 +1049,20 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
           ),
           onPressed: () {
             Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
+          },
+        ),
+        IconButton(
+          tooltip: 'Sign Out',
+          icon: const Icon(
+            LucideIcons.logOut,
+            size: 20,
+            color: AppColors.textSecondary,
+          ),
+          onPressed: () async {
+            await FirebaseService.instance.signOut();
+            if (context.mounted) {
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+            }
           },
         ),
         const SizedBox(width: 8),
@@ -1500,28 +1582,58 @@ class _BuyerRequestsScreenState extends State<BuyerRequestsScreen> {
                         ],
                       ),
                     )
-                  : SizedBox(
-                      height: 38,
-                      child: ElevatedButton.icon(
-                        onPressed: () => _showSendOfferModal(req),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Chat with ${req.clientName}',
+                          icon: const Icon(LucideIcons.messageSquare, size: 16, color: AppColors.primary),
+                          style: IconButton.styleFrom(
+                            backgroundColor: AppColors.primaryLight,
+                            padding: const EdgeInsets.all(8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.of(context).pushNamed(
+                              '/chat',
+                              arguments: {
+                                'contactName': req.clientName,
+                                'otherUserName': req.clientName,
+                                'otherUserRole': 'Client',
+                                'projectTitle': req.title,
+                                'projectBudget': req.budget,
+                              },
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          height: 38,
+                          child: ElevatedButton.icon(
+                            onPressed: () => _showSendOfferModal(req),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(LucideIcons.send, size: 14),
+                            label: Text(
+                              'Send Offer',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
-                        icon: const Icon(LucideIcons.send, size: 14),
-                        label: Text(
-                          'Send Offer',
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
+                      ],
                     ),
             ],
           ),

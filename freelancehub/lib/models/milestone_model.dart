@@ -13,6 +13,7 @@ class MilestoneModel {
   final String? deliverableNote;
   final String? deliverableFileUrl;
   final String? deliverableFileName;
+  final String? revisionNote;
   final DateTime? submittedAt;
   final DateTime? approvedAt;
 
@@ -28,6 +29,7 @@ class MilestoneModel {
     this.deliverableNote,
     this.deliverableFileUrl,
     this.deliverableFileName,
+    this.revisionNote,
     this.submittedAt,
     this.approvedAt,
   });
@@ -56,6 +58,7 @@ class MilestoneModel {
       deliverableNote: map['deliverableNote'] as String?,
       deliverableFileUrl: map['deliverableFileUrl'] as String?,
       deliverableFileName: map['deliverableFileName'] as String?,
+      revisionNote: map['revisionNote'] as String?,
       submittedAt: map['submittedAt'] != null ? parseDate(map['submittedAt']) : null,
       approvedAt: map['approvedAt'] != null ? parseDate(map['approvedAt']) : null,
     );
@@ -77,6 +80,7 @@ class MilestoneModel {
       'deliverableNote': deliverableNote,
       'deliverableFileUrl': deliverableFileUrl,
       'deliverableFileName': deliverableFileName,
+      'revisionNote': revisionNote,
       'submittedAt': submittedAt != null ? Timestamp.fromDate(submittedAt!) : null,
       'approvedAt': approvedAt != null ? Timestamp.fromDate(approvedAt!) : null,
     };
@@ -87,6 +91,7 @@ class MilestoneModel {
     String? deliverableNote,
     String? deliverableFileUrl,
     String? deliverableFileName,
+    String? revisionNote,
     DateTime? submittedAt,
     DateTime? approvedAt,
   }) {
@@ -102,6 +107,7 @@ class MilestoneModel {
       deliverableNote: deliverableNote ?? this.deliverableNote,
       deliverableFileUrl: deliverableFileUrl ?? this.deliverableFileUrl,
       deliverableFileName: deliverableFileName ?? this.deliverableFileName,
+      revisionNote: revisionNote ?? this.revisionNote,
       submittedAt: submittedAt ?? this.submittedAt,
       approvedAt: approvedAt ?? this.approvedAt,
     );

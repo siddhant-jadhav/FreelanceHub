@@ -386,6 +386,7 @@ class _TaskDetailsProposalsScreenState extends State<TaskDetailsProposalsScreen>
                     final scaffoldMessenger = ScaffoldMessenger.of(context);
                     final note = msgCtrl.text.trim();
 
+                    String? activeConvId;
                     try {
                       if (FirebaseConfig.instance.isInitialized) {
                         final currentUid = FirebaseService.instance.currentUser?.uid;
@@ -398,6 +399,7 @@ class _TaskDetailsProposalsScreenState extends State<TaskDetailsProposalsScreen>
                             recipientUserName: proposal.freelancerName,
                             projectId: widget.taskId,
                           );
+                          activeConvId = convId;
                           await FirebaseService.instance.messageRepository.sendMessage(
                             MessageModel(
                               id: '',
@@ -426,6 +428,24 @@ class _TaskDetailsProposalsScreenState extends State<TaskDetailsProposalsScreen>
                         content: Text('Message sent to ${proposal.freelancerName}!'),
                         backgroundColor: AppColors.primary,
                         behavior: SnackBarBehavior.floating,
+                        action: SnackBarAction(
+                          label: 'Open Chat',
+                          textColor: Colors.white,
+                          onPressed: () {
+                            try {
+                              Navigator.of(context).pushNamed(
+                                '/chat',
+                                arguments: {
+                                  'conversationId': activeConvId ?? 'conv_${proposal.freelancerId}',
+                                  'otherUserName': proposal.freelancerName,
+                                  'otherUserRole': 'Freelancer',
+                                  'otherUserId': proposal.freelancerId,
+                                  'projectTitle': _task?.title ?? 'Proposal Discussion',
+                                },
+                              );
+                            } catch (_) {}
+                          },
+                        ),
                       ),
                     );
                   },
@@ -848,6 +868,11 @@ class _TaskDetailsProposalsScreenState extends State<TaskDetailsProposalsScreen>
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Messages',
+            icon: const Icon(LucideIcons.messageSquare, size: 20, color: AppColors.textSecondary),
+            onPressed: () => Navigator.of(context).pushNamed('/messages'),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: CircleAvatar(

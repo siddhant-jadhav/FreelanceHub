@@ -8,6 +8,7 @@ import '../core/theme/app_colors.dart';
 import '../models/message_model.dart';
 import '../models/notification_model.dart';
 import '../models/project_model.dart';
+import '../models/task_model.dart';
 
 /// Model representing a recommended freelancer for client home.
 class FreelancerProfile {
@@ -124,11 +125,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
   String _searchQuery = '';
   ProjectModel? _realActiveProject;
   StreamSubscription<List<ProjectModel>>? _projectsSub;
+  List<TaskModel> _clientTasks = [];
+  StreamSubscription<List<TaskModel>>? _tasksSub;
 
   @override
   void initState() {
     super.initState();
-    _enforceClientRole();
     _initData();
     _loadRealData();
   }
@@ -218,6 +220,17 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
       if (!FirebaseConfig.instance.isInitialized) return;
       final uid = FirebaseService.instance.currentUser?.uid;
       if (uid != null) {
+        _tasksSub = FirebaseService.instance.taskRepository
+            .streamClientTasks(uid)
+            .listen((tasks) {
+          if (!mounted) return;
+          setState(() {
+            _clientTasks = tasks;
+          });
+        }, onError: (e) {
+          debugPrint('Notice streaming client tasks: $e');
+        });
+
         _projectsSub = FirebaseService.instance.projectRepository
             .streamProjectsForClient(uid)
             .listen((projects) {
@@ -264,27 +277,10 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     }
   }
 
-  /// Ensure only Client accounts can view this screen
-  void _enforceClientRole() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final role = FirebaseService.instance.currentRole;
-      if (role == 'freelancer') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Access restricted: Freelancers cannot view client screens.',
-            ),
-            backgroundColor: AppColors.error,
-          ),
-        );
-        Navigator.of(context).pushReplacementNamed('/freelancer-onboarding');
-      }
-    });
-  }
-
   @override
   void dispose() {
     _projectsSub?.cancel();
+    _tasksSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -1134,7 +1130,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Alex Rivera',
+                            _realActiveProject?.freelancerName ?? 'Siddhant Jadhav',
                             style: GoogleFonts.inter(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w700,
@@ -1234,16 +1230,26 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     child: OutlinedButton.icon(
                       onPressed: () {
                         Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Direct chat opened with Alex Rivera.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
+                        final fName = _realActiveProject?.freelancerName ?? 'Siddhant Jadhav';
+                        final fId = _realActiveProject?.freelancerId ?? 'freelancer_siddhant';
+                        final currentUid = FirebaseConfig.instance.isInitialized
+                            ? FirebaseService.instance.currentUser?.uid ?? 'client_vedant'
+                            : 'client_vedant';
+                        final convId = 'conv_${currentUid}_$fId';
+                        Navigator.of(context).pushNamed(
+                          '/chat',
+                          arguments: {
+                            'conversationId': convId,
+                            'otherUserName': fName,
+                            'otherUserRole': 'Freelancer',
+                            'otherUserId': fId,
+                            'projectTitle': _realActiveProject?.title ?? 'Active Project',
+                          },
                         );
                       },
                       icon: const Icon(LucideIcons.messageSquare, size: 16, color: AppColors.textPrimary),
                       label: Text(
-                        'Message Alex',
+                        'Message ${(_realActiveProject?.freelancerName ?? 'Freelancer').split(' ').first}',
                         style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
                       style: OutlinedButton.styleFrom(
@@ -1465,6 +1471,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     Navigator.pop(ctx);
                     final scaffoldMessenger = ScaffoldMessenger.of(context);
                     final note = noteCtrl.text.trim();
+                    String? activeConvId;
                     try {
                       if (FirebaseConfig.instance.isInitialized) {
                         final currentUid = FirebaseService.instance.currentUser?.uid;
@@ -1476,6 +1483,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                             recipientUserId: freelancer.id,
                             recipientUserName: freelancer.name,
                           );
+                          activeConvId = convId;
                           await FirebaseService.instance.messageRepository.sendMessage(
                             MessageModel(
                               id: '',
@@ -1505,6 +1513,16 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         backgroundColor: AppColors.primary,
                         behavior: SnackBarBehavior.floating,
                       ),
+                    );
+                    Navigator.of(context).pushNamed(
+                      '/chat',
+                      arguments: {
+                        'conversationId': activeConvId ?? 'conv_${freelancer.id}',
+                        'otherUserName': freelancer.name,
+                        'otherUserRole': 'Freelancer',
+                        'otherUserId': freelancer.id,
+                        'projectTitle': 'Project Invitation',
+                      },
                     );
                   },
                   icon: const Icon(LucideIcons.send, size: 16, color: Colors.white),
@@ -1649,8 +1667,25 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     );
   }
 
-  /// Opens Review Submission Modal for Marcus Vance (Milestone 2)
+  /// Opens Review Submission Modal for active project deliverables
   void _showReviewSubmissionModal() {
+    final fName = _realActiveProject?.freelancerName.isNotEmpty == true
+        ? _realActiveProject!.freelancerName
+        : (FirebaseConfig.instance.isInitialized ? 'Siddhant Jadhav' : 'Marcus Vance');
+    final fInitials = fName.trim().split(' ').length > 1
+        ? '${fName.trim().split(' ')[0][0]}${fName.trim().split(' ')[1][0]}'.toUpperCase()
+        : fName[0].toUpperCase();
+    final pTitle = _realActiveProject?.title.isNotEmpty == true
+        ? _realActiveProject!.title
+        : 'E-Commerce Redesign (Checkout Flow)';
+    final amount = _realActiveProject?.budget != null && _realActiveProject!.budget > 0
+        ? _realActiveProject!.budget
+        : 350.0;
+    final pId = _realActiveProject?.id ?? 'project_ecommerce_9921';
+    final fId = _realActiveProject?.freelancerId.isNotEmpty == true
+        ? _realActiveProject!.freelancerId
+        : 'dGHpEXlNcJVaQkV9pQfXuSvAl0y2';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1701,7 +1736,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'E-Commerce Redesign (Checkout Flow)',
+                          pTitle,
                           style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
@@ -1734,7 +1769,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                           radius: 16,
                           backgroundColor: AppColors.primaryLight,
                           child: Text(
-                            'MV',
+                            fInitials,
                             style: GoogleFonts.inter(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -1744,7 +1779,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'Marcus Vance',
+                          fName,
                           style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
@@ -1753,7 +1788,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         ),
                         const Spacer(),
                         Text(
-                          'Milestone: \$350.00',
+                          'Milestone: \$${amount.toStringAsFixed(2)}',
                           style: GoogleFonts.inter(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
@@ -1764,7 +1799,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '"Hi! I finished the responsive shopping bag and payment checkout components in Figma, with full auto-layout and interactive prototype tokens. Please review!"',
+                      '"Hi! I finished the responsive screens and deliverables. Please review and release escrow when approved!"',
                       style: GoogleFonts.inter(
                         fontSize: 12.5,
                         color: AppColors.textDark,
@@ -1777,7 +1812,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         const Icon(LucideIcons.fileArchive, size: 14, color: AppColors.textSecondary),
                         const SizedBox(width: 6),
                         Text(
-                          'Checkout_Flow_v2.fig (18.4 MB)',
+                          'Deliverable_Final_v1.zip (24.5 MB)',
                           style: GoogleFonts.inter(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
@@ -1799,11 +1834,11 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         try {
                           if (FirebaseConfig.instance.isInitialized) {
                             await FirebaseService.instance.clientService.reviewMilestoneDeliverable(
-                              projectId: 'project_ecommerce_9921',
-                              milestoneId: 'milestone_2',
-                              freelancerId: 'freelancer_marcus_vance',
-                              milestoneTitle: 'Milestone 2',
-                              amount: 350.0,
+                              projectId: pId,
+                              milestoneId: 'm-1',
+                              freelancerId: fId,
+                              milestoneTitle: pTitle,
+                              amount: amount,
                               approved: false,
                               feedback: 'Revision requested by client.',
                             );
@@ -1814,8 +1849,8 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
 
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Revision request sent to Marcus Vance.'),
+                          SnackBar(
+                            content: Text('Revision request sent to $fName.'),
                             behavior: SnackBarBehavior.floating,
                           ),
                         );
@@ -1845,11 +1880,11 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                         try {
                           if (FirebaseConfig.instance.isInitialized) {
                             await FirebaseService.instance.clientService.reviewMilestoneDeliverable(
-                              projectId: 'project_ecommerce_9921',
-                              milestoneId: 'milestone_2',
-                              freelancerId: 'freelancer_marcus_vance',
-                              milestoneTitle: 'Milestone 2',
-                              amount: 350.0,
+                              projectId: pId,
+                              milestoneId: 'm-1',
+                              freelancerId: fId,
+                              milestoneTitle: pTitle,
+                              amount: amount,
                               approved: true,
                             );
                           }
@@ -1859,8 +1894,8 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
 
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Milestone 2 approved! \$350 released from escrow.'),
+                          SnackBar(
+                            content: Text('Milestone approved! \$${amount.toInt()} released from escrow to $fName.'),
                             backgroundColor: AppColors.primary,
                             behavior: SnackBarBehavior.floating,
                           ),
@@ -2323,6 +2358,30 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
           ],
         ),
         actions: [
+          // Mode switch (Client <-> Freelancer switch)
+          IconButton(
+            tooltip: 'Switch to Freelancer View',
+            icon: const Icon(
+              LucideIcons.arrowLeftRight,
+              size: 19,
+              color: AppColors.textSecondary,
+            ),
+            onPressed: () {
+              FirebaseService.instance.setCurrentRole('freelancer');
+              Navigator.of(context).pushReplacementNamed('/freelancer-dashboard');
+            },
+          ),
+          IconButton(
+            tooltip: 'Messages',
+            icon: const Icon(
+              LucideIcons.messageSquare,
+              size: 20,
+              color: AppColors.textSecondary,
+            ),
+            onPressed: () {
+              Navigator.of(context).pushNamed('/messages');
+            },
+          ),
           Stack(
             children: [
               IconButton(
@@ -2646,6 +2705,11 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
 
               const SizedBox(height: 22),
 
+              // 3b. My Posted Tasks & Proposals (Live Marketplace Opportunities)
+              _buildPostedTasksSection(),
+
+              const SizedBox(height: 22),
+
               // 4. Active Deliveries Quick Summary
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2912,7 +2976,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  _realActiveProject?.freelancerName ?? 'Alex Rivera',
+                                  _realActiveProject?.freelancerName ?? 'Siddhant Jadhav',
                                   style: GoogleFonts.inter(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
@@ -2931,6 +2995,37 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                               ],
                             ),
                           ),
+                          IconButton(
+                            tooltip: 'Chat with Freelancer',
+                            icon: const Icon(LucideIcons.messageSquare, size: 18, color: AppColors.primary),
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppColors.primaryLight,
+                              padding: const EdgeInsets.all(8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                              ),
+                            ),
+                            onPressed: () {
+                              final fName = _realActiveProject?.freelancerName ?? 'Siddhant Jadhav';
+                              final fId = _realActiveProject?.freelancerId ?? 'freelancer_siddhant';
+                              final currentUid = FirebaseConfig.instance.isInitialized
+                                  ? FirebaseService.instance.currentUser?.uid ?? 'client_vedant'
+                                  : 'client_vedant';
+                              final convId = 'conv_${currentUid}_$fId';
+                              Navigator.of(context).pushNamed(
+                                '/chat',
+                                arguments: {
+                                  'conversationId': convId,
+                                  'otherUserName': fName,
+                                  'otherUserRole': 'Freelancer',
+                                  'otherUserId': fId,
+                                  'projectTitle': _realActiveProject?.title ?? 'Active Project',
+                                },
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
                           ElevatedButton.icon(
                             onPressed: _showWorkspaceModal,
                             icon: const Icon(LucideIcons.arrowRight, size: 14, color: Colors.white),
@@ -3358,13 +3453,25 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
         currentIndex: _selectedNavIndex,
         onTap: (index) {
           setState(() => _selectedNavIndex = index);
-          if (index == 2) {
+          if (index == 1) {
+            Navigator.of(context).pushNamed('/post-task').then((_) {
+              if (mounted) setState(() => _selectedNavIndex = 0);
+            });
+          } else if (index == 2) {
             Navigator.of(context).pushNamed(
               '/project-workspace',
               arguments: _realActiveProject,
-            );
+            ).then((_) {
+              if (mounted) setState(() => _selectedNavIndex = 0);
+            });
           } else if (index == 3) {
-            Navigator.of(context).pushNamed('/messages');
+            Navigator.of(context).pushNamed('/messages').then((_) {
+              if (mounted) setState(() => _selectedNavIndex = 0);
+            });
+          } else if (index == 4) {
+            Navigator.of(context).pushNamed('/escrow-payments').then((_) {
+              if (mounted) setState(() => _selectedNavIndex = 0);
+            });
           }
         },
         backgroundColor: Colors.white,
@@ -3381,24 +3488,24 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.house, size: 24),
+            icon: Icon(LucideIcons.house, size: 22),
             label: 'Home',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.compass, size: 24),
-            label: 'Explore',
+            icon: Icon(LucideIcons.circlePlus, size: 22),
+            label: 'Post Task',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.briefcase, size: 24),
+            icon: Icon(LucideIcons.briefcase, size: 22),
             label: 'Projects',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.messageSquare, size: 24),
+            icon: Icon(LucideIcons.messageSquare, size: 22),
             label: 'Messages',
           ),
           BottomNavigationBarItem(
-            icon: Icon(LucideIcons.user, size: 24),
-            label: 'Profile',
+            icon: Icon(LucideIcons.shieldCheck, size: 22),
+            label: 'Escrow',
           ),
         ],
       ),
@@ -3671,6 +3778,35 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Message ${freelancer.name}',
+                      icon: const Icon(LucideIcons.messageSquare, size: 16, color: AppColors.primary),
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.primaryLight,
+                        padding: const EdgeInsets.all(8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                        ),
+                      ),
+                      onPressed: () {
+                        final currentUid = FirebaseConfig.instance.isInitialized
+                            ? FirebaseService.instance.currentUser?.uid ?? 'client_vedant'
+                            : 'client_vedant';
+                        final convId = 'conv_${currentUid}_${freelancer.id}';
+                        Navigator.of(context).pushNamed(
+                          '/chat',
+                          arguments: {
+                            'conversationId': convId,
+                            'otherUserName': freelancer.name,
+                            'otherUserRole': 'Freelancer',
+                            'otherUserId': freelancer.id,
+                            'projectTitle': 'Direct Inquiry',
+                          },
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
                     ElevatedButton.icon(
                       onPressed: () => _showHireFreelancerModal(freelancer),
                       icon: const Icon(LucideIcons.arrowUpRight, size: 14, color: Colors.white),
@@ -3819,6 +3955,298 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
                     ),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inDays > 0) {
+      return '${diff.inDays}d ago';
+    } else if (diff.inHours > 0) {
+      return '${diff.inHours}h ago';
+    } else if (diff.inMinutes > 0) {
+      return '${diff.inMinutes}m ago';
+    }
+    return 'Just now';
+  }
+
+  Widget _buildPostedTasksSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'My Posted Tasks',
+                  style: GoogleFonts.inter(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _clientTasks.isNotEmpty ? AppColors.primary : AppColors.surfaceSecondary,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _clientTasks.isNotEmpty ? AppColors.primary : AppColors.border,
+                    ),
+                  ),
+                  child: Text(
+                    '${_clientTasks.length}',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _clientTasks.isNotEmpty ? Colors.white : AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            GestureDetector(
+              onTap: () => Navigator.pushNamed(context, '/post-task'),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.circlePlus, size: 14, color: AppColors.primaryDark),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Post New Task',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryDark,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (_clientTasks.isNotEmpty) ...[
+          ..._clientTasks.map((task) => _buildClientTaskCard(task)),
+        ] else if (FirebaseConfig.instance.isInitialized) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              children: [
+                const Icon(LucideIcons.clipboardList, size: 28, color: AppColors.textSecondary),
+                const SizedBox(height: 8),
+                Text(
+                  'No Tasks Posted Yet',
+                  style: GoogleFonts.inter(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Post a task to get bids & proposals from skilled freelancers.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.pushNamed(context, '/post-task'),
+                  icon: const Icon(LucideIcons.plus, size: 14, color: Colors.white),
+                  label: Text(
+                    'Post a Task',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildClientTaskCard(TaskModel task) {
+    final hasOffers = task.offersCount > 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: hasOffers ? AppColors.primary.withValues(alpha: 0.3) : AppColors.border,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSecondary,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  task.category,
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                decoration: BoxDecoration(
+                  color: hasOffers ? AppColors.primaryLight : AppColors.surfaceSecondary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: hasOffers ? AppColors.primary.withValues(alpha: 0.3) : AppColors.border,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      hasOffers ? LucideIcons.mail : LucideIcons.clock,
+                      size: 12,
+                      color: hasOffers ? AppColors.primaryDark : AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      hasOffers
+                          ? '${task.offersCount} ${task.offersCount == 1 ? 'Proposal' : 'Proposals'} Received'
+                          : 'Open • Waiting for bids',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: hasOffers ? AppColors.primaryDark : AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            task.title,
+            style: GoogleFonts.inter(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+              height: 1.3,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            task.description,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+              color: AppColors.textSecondary,
+              height: 1.4,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    '\$${task.budget.toStringAsFixed(0)}',
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '• ${task.budgetType.toUpperCase()} • ${_formatTimeAgo(task.createdAt)}',
+                    style: GoogleFonts.inter(
+                      fontSize: 11.5,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pushNamed(
+                    context,
+                    '/task-details',
+                    arguments: task,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: hasOffers ? AppColors.primary : AppColors.surfaceSecondary,
+                  foregroundColor: hasOffers ? Colors.white : AppColors.textPrimary,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(
+                      color: hasOffers ? AppColors.primary : AppColors.border,
+                    ),
+                  ),
+                ),
+                icon: Icon(
+                  hasOffers ? LucideIcons.users : LucideIcons.eye,
+                  size: 14,
+                ),
+                label: Text(
+                  hasOffers ? 'Review Proposals (${task.offersCount})' : 'View Task Details',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ],
           ),

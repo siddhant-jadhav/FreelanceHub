@@ -176,9 +176,13 @@ class NotificationService {
   Future<void> notifyRevisionRequested({
     required String freelancerUserId,
     required String clientName,
-    required String milestoneTitle,
+    String? milestoneTitle,
+    String? projectTitle,
     required String projectId,
+    String? note,
   }) async {
+    final target = milestoneTitle ?? projectTitle ?? 'Milestone Delivery';
+    final extra = (note != null && note.isNotEmpty) ? ': "$note"' : '.';
     await _notificationRepo.createNotification(
       NotificationModel(
         id: '',
@@ -186,7 +190,7 @@ class NotificationService {
         type: 'revision_requested',
         title: 'Revision Requested',
         message:
-            '$clientName requested revisions on milestone "$milestoneTitle".',
+            '$clientName requested revisions on "$target"$extra',
         referenceId: projectId,
         createdAt: DateTime.now(),
       ),

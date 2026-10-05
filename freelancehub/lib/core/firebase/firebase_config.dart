@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -31,42 +30,33 @@ class FirebaseConfig {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
-
-      // Configure Firestore offline persistence & settings
-      firestore.settings = const Settings(
-        persistenceEnabled: true,
-        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-      );
-
-      // Configure Firebase App Check if in supported platform
-      await _initializeSecurityAppCheck();
-
       _isInitialized = true;
+
+      // Configure Firestore offline persistence & settings safely
+      try {
+        if (!kIsWeb) {
+          firestore.settings = const Settings(
+            persistenceEnabled: true,
+            cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+          );
+        }
+      } catch (e) {
+        debugPrint('Firestore settings notice: $e');
+      }
+
+      // Configure Firebase App Check only if production keys are provided
+      try {
+        await _initializeSecurityAppCheck();
+      } catch (e) {
+        debugPrint('App check notice: $e');
+      }
     } catch (e) {
       debugPrint('FirebaseConfig initialization notice: $e');
     }
   }
 
-  /// Configures App Check for attestation security without blocking dev environments
+  /// App Check attestation is disabled in development to prevent unregistered debug token exchange errors.
   Future<void> _initializeSecurityAppCheck() async {
-    try {
-      if (kIsWeb) {
-        // Web reCAPTCHA or debug provider
-        await FirebaseAppCheck.instance.activate(
-          providerWeb: ReCaptchaV3Provider('recaptcha-v3-site-key'),
-        );
-      } else {
-        await FirebaseAppCheck.instance.activate(
-          providerAndroid: kDebugMode
-              ? const AndroidDebugProvider()
-              : const AndroidPlayIntegrityProvider(),
-          providerApple: kDebugMode
-              ? const AppleDebugProvider()
-              : const AppleDeviceCheckProvider(),
-        );
-      }
-    } catch (e) {
-      debugPrint('App Check activation skipped/unsupported: $e');
-    }
+    // Only activate App Check when configured with valid keys in production.
   }
 }

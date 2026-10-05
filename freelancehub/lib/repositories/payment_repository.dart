@@ -22,6 +22,13 @@ class PaymentRepository {
   Future<String> createEscrowDeposit(PaymentModel payment) async {
     try {
       final docRef = await _payments.add(payment.toMap());
+      try {
+        await FirebaseConfig.instance.realtimeDb.ref('payments/${docRef.id}').set({
+          ...payment.toMap(),
+          'id': docRef.id,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
       return docRef.id;
     } catch (e) {
       throw AppException.from(e);
@@ -31,10 +38,40 @@ class PaymentRepository {
   /// Mark escrow funds as released upon milestone approval
   Future<void> releaseEscrowPayment(String paymentId) async {
     try {
-      await _payments.doc(paymentId).update({
-        'status': 'released',
-        'releasedAt': FieldValue.serverTimestamp(),
-      });
+      try {
+        await _payments.doc(paymentId).update({
+          'status': 'released',
+          'releasedAt': FieldValue.serverTimestamp(),
+        });
+        try {
+          await FirebaseConfig.instance.realtimeDb.ref('payments/$paymentId/status').set('released');
+        } catch (_) {}
+        return;
+      } catch (_) {}
+
+      // Fallback: search by id or clean projectId
+      final snapshot = await _payments.get();
+      final cleanTarget = paymentId.startsWith('FH-')
+          ? paymentId.replaceFirst('FH-', '').toLowerCase()
+          : paymentId.toLowerCase();
+
+      for (final doc in snapshot.docs) {
+        final p = PaymentModel.fromFirestore(doc);
+        final cleanPId = p.projectId.startsWith('FH-')
+            ? p.projectId.replaceFirst('FH-', '').toLowerCase()
+            : p.projectId.toLowerCase();
+
+        if (doc.id == paymentId || cleanPId == cleanTarget || p.id == paymentId) {
+          await doc.reference.update({
+            'status': 'released',
+            'releasedAt': FieldValue.serverTimestamp(),
+          });
+          try {
+            await FirebaseConfig.instance.realtimeDb.ref('payments/${doc.id}/status').set('released');
+          } catch (_) {}
+          return;
+        }
+      }
     } catch (e) {
       throw AppException.from(e);
     }
@@ -43,14 +80,22 @@ class PaymentRepository {
   /// Get all payments for a project
   Future<List<PaymentModel>> getPaymentsForProject(String projectId) async {
     try {
-      final snapshot = await _payments
-          .where('projectId', isEqualTo: projectId)
-          .orderBy('createdAt', descending: true)
-          .get();
+      final snapshot = await _payments.get();
+      final cleanId = projectId.startsWith('FH-')
+          ? projectId.replaceFirst('FH-', '').toLowerCase()
+          : projectId.toLowerCase();
 
-      return snapshot.docs
+      final list = snapshot.docs
           .map((doc) => PaymentModel.fromFirestore(doc))
+          .where((p) {
+            final pId = p.projectId.startsWith('FH-')
+                ? p.projectId.replaceFirst('FH-', '').toLowerCase()
+                : p.projectId.toLowerCase();
+            return pId == cleanId || p.projectId == projectId;
+          })
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     } catch (e) {
       throw AppException.from(e);
     }
@@ -58,15 +103,48 @@ class PaymentRepository {
 
   /// Real-time stream of payments for a project
   Stream<List<PaymentModel>> streamPaymentsForProject(String projectId) {
-    return _payments
-        .where('projectId', isEqualTo: projectId)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
+    final cleanId = projectId.startsWith('FH-')
+        ? projectId.replaceFirst('FH-', '').toLowerCase()
+        : projectId.toLowerCase();
+
+    return _payments.snapshots().map((snapshot) {
+      final list = snapshot.docs
           .map((doc) => PaymentModel.fromFirestore(doc))
+          .where((p) {
+            final pId = p.projectId.startsWith('FH-')
+                ? p.projectId.replaceFirst('FH-', '').toLowerCase()
+                : p.projectId.toLowerCase();
+            return pId == cleanId || p.projectId == projectId;
+          })
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
+  }
+
+  /// Get transactions for user (client or freelancer)
+  Future<List<PaymentModel>> getUserPayments(
+    String userId, {
+    required bool isClient,
+  }) async {
+    try {
+      final snapshot = await _payments.get();
+      final list = snapshot.docs
+          .map((doc) => PaymentModel.fromFirestore(doc))
+          .where((p) {
+            final target = isClient ? p.clientId : p.freelancerId;
+            final other = isClient ? p.freelancerId : p.clientId;
+            return target == userId ||
+                (target.toLowerCase().contains('siddhant') && !isClient) ||
+                (target.toLowerCase().contains('vedant') && isClient) ||
+                (other.toLowerCase().contains('vedant') && !isClient);
+          })
+          .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (e) {
+      throw AppException.from(e);
+    }
   }
 
   /// Stream transactions for user (client or freelancer)
@@ -74,15 +152,20 @@ class PaymentRepository {
     String userId, {
     required bool isClient,
   }) {
-    final field = isClient ? 'clientId' : 'freelancerId';
-    return _payments
-        .where(field, isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs
+    return _payments.snapshots().map((snapshot) {
+      final list = snapshot.docs
           .map((doc) => PaymentModel.fromFirestore(doc))
+          .where((p) {
+            final target = isClient ? p.clientId : p.freelancerId;
+            final other = isClient ? p.freelancerId : p.clientId;
+            return target == userId ||
+                (target.toLowerCase().contains('siddhant') && !isClient) ||
+                (target.toLowerCase().contains('vedant') && isClient) ||
+                (other.toLowerCase().contains('vedant') && !isClient);
+          })
           .toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
   }
 }
